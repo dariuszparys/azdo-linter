@@ -141,6 +141,11 @@ impl OutputFormatter {
         format!("  [INFO] {message}")
     }
 
+    /// Format a warning message
+    pub fn warning(message: &str) -> String {
+        format!("  [WARN] {message}")
+    }
+
     /// Format a section header
     pub fn section(title: &str) -> String {
         format!("\n{}\n{}", title, "-".repeat(title.len()))

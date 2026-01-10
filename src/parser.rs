@@ -446,6 +446,87 @@ fn looks_like_shell_command(name: &str) -> bool {
     name.contains(' ')
 }
 
+/// Information about whether a file is a template
+#[derive(Debug)]
+pub struct TemplateInfo {
+    /// Whether the file appears to be a template
+    pub is_template: bool,
+    /// Names of template parameters (if any)
+    pub parameter_names: Vec<String>,
+}
+
+/// Detect if a pipeline file is a template
+///
+/// Templates are characterized by:
+/// - Having a top-level `parameters:` section
+/// - NOT having a `trigger:` key (templates don't define triggers)
+///
+/// # Arguments
+/// * `path` - Path to the YAML pipeline file
+///
+/// # Returns
+/// * `Result<TemplateInfo>` - Information about whether the file is a template
+pub fn detect_template(path: &str) -> Result<TemplateInfo> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read pipeline file: {path}"))?;
+
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse YAML in pipeline file: {path}"))?;
+
+    let mapping = match yaml.as_mapping() {
+        Some(m) => m,
+        None => {
+            return Ok(TemplateInfo {
+                is_template: false,
+                parameter_names: Vec::new(),
+            })
+        }
+    };
+
+    // Check for template indicators
+    let has_parameters = mapping.contains_key(serde_yaml::Value::String("parameters".to_string()));
+    let has_trigger = mapping.contains_key(serde_yaml::Value::String("trigger".to_string()));
+    let has_pr = mapping.contains_key(serde_yaml::Value::String("pr".to_string()));
+
+    // A template has parameters but no trigger/pr
+    let is_template = has_parameters && !has_trigger && !has_pr;
+
+    // Extract parameter names if this is a template
+    let parameter_names = if is_template {
+        extract_parameter_names(&yaml)
+    } else {
+        Vec::new()
+    };
+
+    Ok(TemplateInfo {
+        is_template,
+        parameter_names,
+    })
+}
+
+/// Extract parameter names from the YAML parameters section
+fn extract_parameter_names(yaml: &serde_yaml::Value) -> Vec<String> {
+    let mut names = Vec::new();
+
+    if let Some(mapping) = yaml.as_mapping() {
+        if let Some(params) = mapping.get(serde_yaml::Value::String("parameters".to_string())) {
+            if let Some(params_seq) = params.as_sequence() {
+                for param in params_seq {
+                    if let Some(param_map) = param.as_mapping() {
+                        if let Some(serde_yaml::Value::String(name)) =
+                            param_map.get(serde_yaml::Value::String("name".to_string()))
+                        {
+                            names.push(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    names
+}
+
 /// Extract variable references from raw YAML content string
 /// Filters out PowerShell expressions, system variables, and runtime output variables
 ///

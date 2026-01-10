@@ -3,7 +3,7 @@ use std::process;
 
 use azdo_linter::azure::AzureDevOpsClient;
 use azdo_linter::error::OutputFormatter;
-use azdo_linter::parser::{extract_variable_references, parse_pipeline_file};
+use azdo_linter::parser::{detect_template, extract_variable_references, parse_pipeline_file};
 use azdo_linter::validator::{validate_variable_groups, validate_variables, VariableSource};
 
 /// Azure DevOps pipeline YAML validator
@@ -73,6 +73,34 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
     if args.verbose {
         println!("{}", OutputFormatter::info(&format!("Parsing pipeline file: {}", args.pipeline_file)));
     }
+
+    // Check if this is a template file
+    let template_info = detect_template(&args.pipeline_file)?;
+    if template_info.is_template {
+        println!(
+            "{}",
+            OutputFormatter::warning("This appears to be a template file")
+        );
+        println!();
+        println!("  Template files cannot be validated in isolation because they expect");
+        println!("  variables to be provided by the parent pipeline that includes them.");
+        println!();
+        if !template_info.parameter_names.is_empty() {
+            println!("  Template parameters defined:");
+            for param in &template_info.parameter_names {
+                println!("    - {param}");
+            }
+            println!();
+        }
+        println!("  To validate variables used in this template, run the linter against");
+        println!("  the parent pipeline that includes this template.");
+        println!();
+        println!("================================");
+        println!("RESULT: SKIPPED (template file)");
+        println!("================================");
+        return Ok(false); // Exit successfully, not a validation failure
+    }
+
     let pipeline = parse_pipeline_file(&args.pipeline_file)?;
 
     // Extract variable groups from the pipeline (searches all levels: top, stage, job)
