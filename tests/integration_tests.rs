@@ -33,7 +33,7 @@ fn test_parse_pipeline_with_inline_variables() {
     let mut found_build_config = false;
     let mut found_dotnet_version = false;
 
-    for entry in &variables {
+    for entry in variables.iter() {
         if let VariableEntry::Named { name, value } = entry {
             if name == "BuildConfiguration" {
                 found_build_config = true;

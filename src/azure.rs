@@ -22,9 +22,9 @@ pub struct VariableGroupData {
 pub struct VariableValue {
     /// The variable value (may be None for secret variables)
     pub value: Option<String>,
-    /// Whether the variable is secret
-    #[serde(rename = "isSecret", default)]
-    pub is_secret: bool,
+    /// Whether the variable is secret (can be null in Azure DevOps API response)
+    #[serde(rename = "isSecret")]
+    pub is_secret: Option<bool>,
 }
 
 /// Client for interacting with Azure DevOps via Azure CLI
@@ -42,8 +42,15 @@ impl AzureDevOpsClient {
     /// * `organization` - Azure DevOps organization URL or name
     /// * `project` - Azure DevOps project name
     pub fn new(organization: String, project: String) -> Self {
+        // Normalize organization to full URL if needed
+        let organization_url = if organization.starts_with("https://") || organization.starts_with("http://") {
+            organization
+        } else {
+            format!("https://dev.azure.com/{}", organization)
+        };
+
         Self {
-            organization,
+            organization: organization_url,
             project,
         }
     }
@@ -209,7 +216,20 @@ mod tests {
     fn test_client_creation_with_org_name() {
         let client = AzureDevOpsClient::new("myorg".to_string(), "myproject".to_string());
 
-        assert_eq!(client.organization, "myorg");
+        // Organization name should be normalized to full URL
+        assert_eq!(client.organization, "https://dev.azure.com/myorg");
+        assert_eq!(client.project, "myproject");
+    }
+
+    #[test]
+    fn test_client_creation_preserves_full_url() {
+        let client = AzureDevOpsClient::new(
+            "https://dev.azure.com/customorg".to_string(),
+            "myproject".to_string(),
+        );
+
+        // Full URL should be preserved as-is
+        assert_eq!(client.organization, "https://dev.azure.com/customorg");
         assert_eq!(client.project, "myproject");
     }
 
@@ -244,12 +264,12 @@ mod tests {
             .get("ConnectionString")
             .expect("ConnectionString not found");
         assert_eq!(conn_string.value, Some("Server=prod.db;".to_string()));
-        assert!(!conn_string.is_secret);
+        assert_eq!(conn_string.is_secret, Some(false));
 
         // Verify ApiKey variable (secret)
         let api_key = group_data.variables.get("ApiKey").expect("ApiKey not found");
         assert!(api_key.value.is_none());
-        assert!(api_key.is_secret);
+        assert_eq!(api_key.is_secret, Some(true));
     }
 
     #[test]
@@ -289,7 +309,7 @@ mod tests {
             .get("SimpleVar")
             .expect("SimpleVar not found");
         assert_eq!(simple_var.value, Some("hello".to_string()));
-        assert!(!simple_var.is_secret); // Default value
+        assert_eq!(simple_var.is_secret, None); // Missing field becomes None
     }
 
     #[test]
@@ -325,7 +345,7 @@ mod tests {
             serde_json::from_str(json_response).expect("Failed to parse JSON");
 
         assert!(var_value.value.is_none());
-        assert!(var_value.is_secret);
+        assert_eq!(var_value.is_secret, Some(true));
     }
 
     #[test]
@@ -337,6 +357,18 @@ mod tests {
             serde_json::from_str(json_response).expect("Failed to parse JSON");
 
         assert_eq!(var_value.value, Some("test-value".to_string()));
-        assert!(!var_value.is_secret);
+        assert_eq!(var_value.is_secret, None); // Missing field becomes None
+    }
+
+    #[test]
+    fn test_variable_value_deserialization_with_null_is_secret() {
+        // Test that null isSecret (common in Azure DevOps responses) works
+        let json_response = r#"{"value": "test-value", "isSecret": null}"#;
+
+        let var_value: VariableValue =
+            serde_json::from_str(json_response).expect("Failed to parse JSON");
+
+        assert_eq!(var_value.value, Some("test-value".to_string()));
+        assert_eq!(var_value.is_secret, None); // Explicit null becomes None
     }
 }

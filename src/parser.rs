@@ -24,7 +24,7 @@ pub struct Variable {
     pub value: Option<String>,
 }
 
-/// Represents a variable entry in the variables section
+/// Represents a variable entry in the variables section (list format)
 /// Azure DevOps YAML supports multiple formats:
 /// - group: 'GroupName' (variable group reference)
 /// - name: 'VarName' + value: 'VarValue' (inline variable)
@@ -38,22 +38,61 @@ pub enum VariableEntry {
     Named { name: String, value: Option<String> },
     /// Template reference: - template: 'path'
     Template { template: String },
+    /// Catch-all for template expressions like ${{ if eq(...) }} and other compile-time constructs
+    Conditional(serde_yaml::Value),
+}
+
+/// Variables section that can be either a list or a map
+/// Azure DevOps supports two formats:
+/// - List format: variables: [{ name: 'x', value: 'y' }, { group: 'z' }]
+/// - Map format: variables: { varName: 'value', anotherVar: 'value2' }
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum Variables {
+    /// List format with structured entries
+    List(Vec<VariableEntry>),
+    /// Map format with simple key-value pairs
+    Map(std::collections::HashMap<String, serde_yaml::Value>),
+}
+
+impl Variables {
+    /// Returns the number of entries in the variables section
+    pub fn len(&self) -> usize {
+        match self {
+            Variables::List(entries) => entries.len(),
+            Variables::Map(map) => map.len(),
+        }
+    }
+
+    /// Returns true if the variables section is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns an iterator over the variable entries (only works for List format)
+    /// For Map format, returns an empty iterator
+    pub fn iter(&self) -> std::slice::Iter<'_, VariableEntry> {
+        match self {
+            Variables::List(entries) => entries.iter(),
+            Variables::Map(_) => [].iter(),
+        }
+    }
 }
 
 /// Represents a job in a stage
 #[derive(Debug, Deserialize)]
 pub struct Job {
-    /// Job-level variables
+    /// Job-level variables (supports both list and map formats)
     #[serde(default)]
-    pub variables: Option<Vec<VariableEntry>>,
+    pub variables: Option<Variables>,
 }
 
 /// Represents a deployment job in a stage
 #[derive(Debug, Deserialize)]
 pub struct Deployment {
-    /// Deployment-level variables
+    /// Deployment-level variables (supports both list and map formats)
     #[serde(default)]
-    pub variables: Option<Vec<VariableEntry>>,
+    pub variables: Option<Variables>,
 }
 
 /// Represents a stage in the pipeline
@@ -62,9 +101,9 @@ pub struct Stage {
     /// Stage name
     #[serde(default)]
     pub stage: Option<String>,
-    /// Stage-level variables
+    /// Stage-level variables (supports both list and map formats)
     #[serde(default)]
-    pub variables: Option<Vec<VariableEntry>>,
+    pub variables: Option<Variables>,
     /// Jobs in the stage
     #[serde(default)]
     pub jobs: Option<Vec<Job>>,
@@ -74,8 +113,9 @@ pub struct Stage {
 #[derive(Debug, Deserialize)]
 pub struct Pipeline {
     /// Variables section containing both inline variables and group references
+    /// (supports both list and map formats)
     #[serde(default)]
-    pub variables: Option<Vec<VariableEntry>>,
+    pub variables: Option<Variables>,
     /// Stages in the pipeline
     #[serde(default)]
     pub stages: Option<Vec<Stage>>,
@@ -111,16 +151,20 @@ impl Pipeline {
     }
 
     /// Helper function to collect variable groups from a variables section
-    fn collect_groups_from_variables(
-        variables: &Option<Vec<VariableEntry>>,
-        groups: &mut Vec<String>,
-    ) {
+    fn collect_groups_from_variables(variables: &Option<Variables>, groups: &mut Vec<String>) {
         if let Some(ref vars) = variables {
-            for entry in vars {
-                if let VariableEntry::Group { group } = entry {
-                    if !groups.contains(group) {
-                        groups.push(group.clone());
+            match vars {
+                Variables::List(entries) => {
+                    for entry in entries {
+                        if let VariableEntry::Group { group } = entry {
+                            if !groups.contains(group) {
+                                groups.push(group.clone());
+                            }
+                        }
                     }
+                }
+                Variables::Map(_) => {
+                    // Map format doesn't support variable groups
                 }
             }
         }
@@ -155,15 +199,24 @@ impl Pipeline {
     }
 
     /// Helper function to collect inline variable names from a variables section
-    fn collect_inline_variables(
-        variables: &Option<Vec<VariableEntry>>,
-        names: &mut Vec<String>,
-    ) {
+    fn collect_inline_variables(variables: &Option<Variables>, names: &mut Vec<String>) {
         if let Some(ref vars) = variables {
-            for entry in vars {
-                if let VariableEntry::Named { name, .. } = entry {
-                    if !names.contains(name) {
-                        names.push(name.clone());
+            match vars {
+                Variables::List(entries) => {
+                    for entry in entries {
+                        if let VariableEntry::Named { name, .. } = entry {
+                            if !names.contains(name) {
+                                names.push(name.clone());
+                            }
+                        }
+                    }
+                }
+                Variables::Map(map) => {
+                    // Map format: each key is a variable name
+                    for name in map.keys() {
+                        if !names.contains(name) {
+                            names.push(name.clone());
+                        }
                     }
                 }
             }
@@ -249,6 +302,9 @@ fn is_runtime_output_variable(name: &str) -> bool {
     true
 }
 
+/// Azure DevOps build number format specifiers that should be skipped
+const BUILD_NUMBER_FORMAT_PREFIXES: &[&str] = &["Date:", "Rev:"];
+
 /// Check if a variable pattern should be skipped during validation
 fn should_skip_variable(name: &str) -> bool {
     // Skip PowerShell expressions: $($outputs.foo), $($env:VAR)
@@ -263,6 +319,14 @@ fn should_skip_variable(name: &str) -> bool {
 
     // Skip system variables
     if is_system_variable(name) {
+        return true;
+    }
+
+    // Skip build number format specifiers like $(Date:yyyyMMdd), $(Rev:r)
+    if BUILD_NUMBER_FORMAT_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+    {
         return true;
     }
 
