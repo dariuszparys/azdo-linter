@@ -46,7 +46,7 @@ impl AzureDevOpsClient {
         let organization_url = if organization.starts_with("https://") || organization.starts_with("http://") {
             organization
         } else {
-            format!("https://dev.azure.com/{}", organization)
+            format!("https://dev.azure.com/{organization}")
         };
 
         Self {
@@ -71,7 +71,7 @@ impl AzureDevOpsClient {
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Azure CLI check failed: {}", stderr)
+            anyhow::bail!("Azure CLI check failed: {stderr}")
         }
     }
 
@@ -94,24 +94,21 @@ impl AzureDevOpsClient {
                 "--project",
                 &self.project,
                 "--query",
-                &format!("[?name=='{}'] | [0]", group_name),
+                &format!("[?name=='{group_name}'] | [0]"),
                 "--output",
                 "json",
             ])
             .output()
             .with_context(|| {
                 format!(
-                    "Failed to execute 'az pipelines variable-group list' for group '{}'",
-                    group_name
+                    "Failed to execute 'az pipelines variable-group list' for group '{group_name}'"
                 )
             })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!(
-                "Azure CLI command failed for variable group '{}': {}",
-                group_name,
-                stderr
+                "Azure CLI command failed for variable group '{group_name}': {stderr}"
             );
         }
 
@@ -120,14 +117,13 @@ impl AzureDevOpsClient {
 
         // Check if the result is null or empty (group not found)
         if trimmed.is_empty() || trimmed == "null" {
-            anyhow::bail!("Variable group '{}' not found", group_name);
+            anyhow::bail!("Variable group '{group_name}' not found");
         }
 
         // Parse the JSON response
         let group_data: VariableGroupData = serde_json::from_str(trimmed).with_context(|| {
             format!(
-                "Failed to parse Azure CLI response for variable group '{}'",
-                group_name
+                "Failed to parse Azure CLI response for variable group '{group_name}'"
             )
         })?;
 
@@ -160,17 +156,14 @@ impl AzureDevOpsClient {
             .output()
             .with_context(|| {
                 format!(
-                    "Failed to execute 'az pipelines variable-group show' for group ID {}",
-                    group_id
+                    "Failed to execute 'az pipelines variable-group show' for group ID {group_id}"
                 )
             })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!(
-                "Azure CLI command failed for variable group ID {}: {}",
-                group_id,
-                stderr
+                "Azure CLI command failed for variable group ID {group_id}: {stderr}"
             );
         }
 
@@ -179,14 +172,13 @@ impl AzureDevOpsClient {
 
         // Check if the result is null or empty (group not found)
         if trimmed.is_empty() || trimmed == "null" {
-            anyhow::bail!("Variable group with ID {} not found", group_id);
+            anyhow::bail!("Variable group with ID {group_id} not found");
         }
 
         // Parse the JSON response
         let group_data: VariableGroupData = serde_json::from_str(trimmed).with_context(|| {
             format!(
-                "Failed to parse Azure CLI response for variable group ID {}",
-                group_id
+                "Failed to parse Azure CLI response for variable group ID {group_id}"
             )
         })?;
 

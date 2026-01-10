@@ -224,10 +224,14 @@ impl Pipeline {
                     }
                 }
                 Variables::Map(map) => {
-                    // Map format: each key is a variable name
-                    for name in map.keys() {
-                        if !names.contains(name) {
-                            names.push(name.clone());
+                    // Map format: each key is a variable name, unless it's a template conditional
+                    for (key, value) in map {
+                        // Skip template conditional keys - they're not variable names
+                        // Instead, recursively extract variables from the nested structure
+                        if key.starts_with("${{") {
+                            Self::extract_inline_variables_from_value(value, names);
+                        } else if !names.contains(key) {
+                            names.push(key.clone());
                         }
                     }
                 }
@@ -242,7 +246,7 @@ impl Pipeline {
             serde_yaml::Value::Mapping(map) => {
                 // Check if this mapping has a "group" key (direct variable group reference)
                 if let Some(serde_yaml::Value::String(group_name)) =
-                    map.get(&serde_yaml::Value::String("group".to_string()))
+                    map.get(serde_yaml::Value::String("group".to_string()))
                 {
                     if !groups.contains(group_name) {
                         groups.push(group_name.clone());
@@ -265,19 +269,33 @@ impl Pipeline {
 
     /// Recursively extract inline variable names from a serde_yaml::Value
     /// This handles template conditionals like ${{ if eq(...) }} which contain nested variables
+    /// Supports both list format (name: 'x', value: 'y') and map format (varName: 'value')
     fn extract_inline_variables_from_value(value: &serde_yaml::Value, names: &mut Vec<String>) {
         match value {
             serde_yaml::Value::Mapping(map) => {
-                // Check if this mapping has a "name" key (inline variable definition)
+                // Check if this mapping has a "name" key (list format inline variable)
                 if let Some(serde_yaml::Value::String(var_name)) =
-                    map.get(&serde_yaml::Value::String("name".to_string()))
+                    map.get(serde_yaml::Value::String("name".to_string()))
                 {
                     if !names.contains(var_name) {
                         names.push(var_name.clone());
                     }
                 }
-                // Recurse into all values in the mapping
-                for (_key, val) in map {
+
+                // Also handle map format: each key could be a variable name
+                // Skip special keys and template conditionals
+                for (key, val) in map {
+                    if let serde_yaml::Value::String(key_str) = key {
+                        // Skip template conditionals
+                        if key_str.starts_with("${{") {
+                            // Recurse into the conditional's nested structure
+                            Self::extract_inline_variables_from_value(val, names);
+                        } else if !is_special_yaml_key(key_str) && !names.contains(key_str) {
+                            // This is a variable name in map format
+                            names.push(key_str.clone());
+                        }
+                    }
+                    // Always recurse into values to find nested structures
                     Self::extract_inline_variables_from_value(val, names);
                 }
             }
@@ -292,6 +310,14 @@ impl Pipeline {
     }
 }
 
+/// Check if a key is a special YAML key that should not be treated as a variable name
+fn is_special_yaml_key(key: &str) -> bool {
+    const SPECIAL_KEYS: &[&str] = &[
+        "name", "value", "group", "template", "readonly", "isSecret",
+    ];
+    SPECIAL_KEYS.contains(&key)
+}
+
 /// Parse a pipeline YAML file and return the Pipeline structure
 ///
 /// # Arguments
@@ -301,10 +327,10 @@ impl Pipeline {
 /// * `Result<Pipeline>` - Parsed pipeline or error
 pub fn parse_pipeline_file(path: &str) -> Result<Pipeline> {
     let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read pipeline file: {}", path))?;
+        .with_context(|| format!("Failed to read pipeline file: {path}"))?;
 
     let pipeline: Pipeline = serde_yaml::from_str(&content)
-        .with_context(|| format!("Failed to parse YAML in pipeline file: {}", path))?;
+        .with_context(|| format!("Failed to parse YAML in pipeline file: {path}"))?;
 
     Ok(pipeline)
 }
@@ -321,7 +347,7 @@ pub fn parse_pipeline_file(path: &str) -> Result<Pipeline> {
 /// * `Result<Vec<String>>` - Unique list of variable names referenced
 pub fn extract_variable_references(path: &str) -> Result<Vec<String>> {
     let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read pipeline file: {}", path))?;
+        .with_context(|| format!("Failed to read pipeline file: {path}"))?;
 
     extract_variable_references_from_content(&content)
 }
@@ -403,7 +429,21 @@ fn should_skip_variable(name: &str) -> bool {
         return true;
     }
 
+    // Skip shell command substitution patterns
+    // Valid Azure DevOps variable names don't contain spaces
+    // Shell commands like "git merge-base" or "git rev-parse HEAD" do
+    if looks_like_shell_command(name) {
+        return true;
+    }
+
     false
+}
+
+/// Check if a pattern looks like shell command substitution rather than a variable
+/// Shell commands typically contain spaces (e.g., "git merge-base", "git rev-parse HEAD")
+/// while Azure DevOps variable names are alphanumeric with underscores
+fn looks_like_shell_command(name: &str) -> bool {
+    name.contains(' ')
 }
 
 /// Extract variable references from raw YAML content string

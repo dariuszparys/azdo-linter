@@ -57,7 +57,7 @@ fn main() {
             }
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             process::exit(EXIT_ERROR);
         }
     }
@@ -80,7 +80,7 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
     if args.verbose {
         println!("{}", OutputFormatter::info(&format!("Found {} variable group(s) referenced", variable_groups.len())));
         for group in &variable_groups {
-            println!("       - {}", group);
+            println!("       - {group}");
         }
     }
 
@@ -89,7 +89,7 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
     if args.verbose {
         println!("{}", OutputFormatter::info(&format!("Found {} inline variable(s) defined", inline_variables.len())));
         for var in &inline_variables {
-            println!("       - {}", var);
+            println!("       - {var}");
         }
     }
 
@@ -102,7 +102,7 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
             OutputFormatter::info(&format!("Found {} variable reference(s) to validate", variable_references.len()))
         );
         for var in &variable_references {
-            println!("       - $({})", var);
+            println!("       - $({var})");
         }
     }
 
@@ -137,7 +137,7 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
             println!("{}", OutputFormatter::failure(&format!("Variable group '{}' not found", result.group_name)));
             if let Some(ref error) = result.error {
                 if args.verbose {
-                    println!("         Error: {}", error);
+                    println!("         Error: {error}");
                 }
             }
             // Provide actionable suggestion
@@ -191,7 +191,7 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
             );
             if let Some(ref error) = result.error {
                 if args.verbose {
-                    println!("         Error: {}", error);
+                    println!("         Error: {error}");
                 }
             }
             // Provide actionable suggestion

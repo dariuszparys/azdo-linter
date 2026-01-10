@@ -1,0 +1,40 @@
+# Pipeline with map-format conditional variables and shell command substitution
+# This tests job-level variables using the map format with ${{ if ... }} conditionals
+# and variable values containing shell command syntax like $(git ...)
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: TopLevelVar
+    value: top-level-value
+
+stages:
+  - stage: Build
+    displayName: Build Stage
+    jobs:
+      - job: BuildJob
+        displayName: Build Job
+        variables:
+          # Map-format variables with template conditionals
+          ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+            NX_BRANCH: $(System.PullRequest.PullRequestNumber)
+            TARGET_BRANCH: origin/main
+            BASE_SHA: $(git merge-base $(TARGET_BRANCH) HEAD)
+          ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+            NX_BRANCH: $(Build.SourceBranchName)
+            BASE_SHA: $(git rev-parse HEAD~1)
+          # Regular map-format variable
+          HEAD_SHA: $(git rev-parse HEAD)
+          SIMPLE_VAR: simple-value
+        steps:
+          - script: |
+              echo "NX_BRANCH: $(NX_BRANCH)"
+              echo "BASE_SHA: $(BASE_SHA)"
+              echo "HEAD_SHA: $(HEAD_SHA)"
+              echo "Top level: $(TopLevelVar)"
+              echo "Simple: $(SIMPLE_VAR)"
+            displayName: Print variables

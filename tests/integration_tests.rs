@@ -230,3 +230,73 @@ fn test_parse_pipeline_with_conditional_variables() {
     assert!(inline_vars.contains(&"serviceConnection".to_string()), "Should find serviceConnection from conditionals");
     assert!(inline_vars.contains(&"buildNumber".to_string()), "Should find buildNumber");
 }
+
+/// Test that shell command substitution patterns are filtered from variable references
+/// Patterns like $(git merge-base ...) should not be treated as variable references
+#[test]
+fn test_filter_shell_command_substitution() {
+    let path = "tests/fixtures/pipeline_with_map_conditionals.yml";
+    let var_refs = extract_variable_references(path).expect("Failed to extract variable references");
+
+    // Should NOT contain shell command patterns
+    assert!(!var_refs.iter().any(|v| v.contains("git merge-base")),
+        "Should not contain 'git merge-base' shell command");
+    assert!(!var_refs.iter().any(|v| v.contains("git rev-parse")),
+        "Should not contain 'git rev-parse' shell command");
+
+    // Should NOT contain any patterns with spaces (shell commands have spaces)
+    assert!(!var_refs.iter().any(|v| v.contains(' ')),
+        "Should not contain any variable references with spaces");
+}
+
+/// Test parsing map-format conditional variables
+/// Variables defined inside ${{ if ... }} blocks using map format should be extracted
+#[test]
+fn test_parse_map_format_conditionals() {
+    let path = "tests/fixtures/pipeline_with_map_conditionals.yml";
+    let pipeline = parse_pipeline_file(path).expect("Failed to parse pipeline file");
+
+    // Should extract inline variables from map-format conditionals
+    let inline_vars = pipeline.get_inline_variable_names();
+
+    // Variables from inside conditionals
+    assert!(inline_vars.contains(&"NX_BRANCH".to_string()),
+        "Should find NX_BRANCH from conditionals");
+    assert!(inline_vars.contains(&"TARGET_BRANCH".to_string()),
+        "Should find TARGET_BRANCH from conditionals");
+    assert!(inline_vars.contains(&"BASE_SHA".to_string()),
+        "Should find BASE_SHA from conditionals");
+
+    // Regular map-format variables
+    assert!(inline_vars.contains(&"HEAD_SHA".to_string()),
+        "Should find HEAD_SHA as regular map variable");
+    assert!(inline_vars.contains(&"SIMPLE_VAR".to_string()),
+        "Should find SIMPLE_VAR as regular map variable");
+
+    // Top-level list-format variable
+    assert!(inline_vars.contains(&"TopLevelVar".to_string()),
+        "Should find TopLevelVar from top-level variables");
+
+    // Should NOT contain template conditionals as variable names
+    assert!(!inline_vars.iter().any(|v| v.starts_with("${{")),
+        "Should not contain template conditionals as variable names");
+}
+
+/// Test that regular variables are still extracted from pipeline with shell commands
+#[test]
+fn test_regular_variables_with_shell_commands() {
+    let path = "tests/fixtures/pipeline_with_map_conditionals.yml";
+    let var_refs = extract_variable_references(path).expect("Failed to extract variable references");
+
+    // Should contain regular variable references (not shell commands)
+    assert!(var_refs.contains(&"NX_BRANCH".to_string()),
+        "Should find NX_BRANCH variable reference");
+    assert!(var_refs.contains(&"BASE_SHA".to_string()),
+        "Should find BASE_SHA variable reference");
+    assert!(var_refs.contains(&"HEAD_SHA".to_string()),
+        "Should find HEAD_SHA variable reference");
+    assert!(var_refs.contains(&"TopLevelVar".to_string()),
+        "Should find TopLevelVar variable reference");
+    assert!(var_refs.contains(&"SIMPLE_VAR".to_string()),
+        "Should find SIMPLE_VAR variable reference");
+}

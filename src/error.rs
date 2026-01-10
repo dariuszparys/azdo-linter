@@ -128,17 +128,17 @@ pub struct OutputFormatter;
 impl OutputFormatter {
     /// Format a success indicator
     pub fn success(message: &str) -> String {
-        format!("  [PASS] {}", message)
+        format!("  [PASS] {message}")
     }
 
     /// Format a failure indicator
     pub fn failure(message: &str) -> String {
-        format!("  [FAIL] {}", message)
+        format!("  [FAIL] {message}")
     }
 
     /// Format an info message
     pub fn info(message: &str) -> String {
-        format!("  [INFO] {}", message)
+        format!("  [INFO] {message}")
     }
 
     /// Format a section header
@@ -153,17 +153,15 @@ impl OutputFormatter {
             format!(
                 "\n================================\n\
                  RESULT: PASSED\n\
-                 All {} check(s) passed successfully.\n\
-                 ================================",
-                total
+                 All {total} check(s) passed successfully.\n\
+                 ================================"
             )
         } else {
             format!(
                 "\n================================\n\
                  RESULT: FAILED\n\
-                 {} of {} check(s) failed.\n\
-                 ================================",
-                failed, total
+                 {failed} of {total} check(s) failed.\n\
+                 ================================"
             )
         }
     }
