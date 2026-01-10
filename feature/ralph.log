@@ -33,3 +33,14 @@ US-010 is complete. There are still more stories to complete (US-011 through US-
 - Changes committed and tracking files updated
 
 The next story (US-011) involves implementing validation logic for variables in groups.
+I've completed story US-011: Create validation logic for variables in groups.
+
+**Summary of changes:**
+- Added `VariableValidationResult` struct in `validator.rs` with fields for `variable_name`, `group_name`, `exists`, and `error`
+- Implemented `validate_variables` function that:
+  - Takes variable references and group validation results
+  - Fetches all variables from existing variable groups via the Azure DevOps client
+  - Cross-references each variable reference to find which group it belongs to
+  - Returns validation results indicating which variables exist and which are missing
+
+The build succeeded and all acceptance criteria are met. There are still 9 more stories to complete (US-012 through US-020).

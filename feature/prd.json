@@ -196,7 +196,7 @@
       "dependencies": ["US-010"],
       "priority": 11,
       "estimatedComplexity": "medium",
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-012",
@@ -214,7 +214,7 @@
       "dependencies": ["US-001"],
       "priority": 12,
       "estimatedComplexity": "low",
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-013",

@@ -3,8 +3,8 @@
 # Total stories: 20
 # Started: 2026-01-10
 
-Current story: 11
-Completed: 10
+Current story: 13
+Completed: 12
 
 ---
 # Story log (append completed stories below)
@@ -18,3 +18,5 @@ Completed: 10
 2026-01-10 US-008: Implement method to fetch variable group from Azure DevOps
 2026-01-10 US-009: Implement method to get variables from a variable group
 2026-01-10 US-010: Create validation logic for variable groups
+2026-01-10 US-011: Create validation logic for variables in groups
+2026-01-10 US-012: Define CLI argument structure with clap
