@@ -4,3 +4,21 @@ Task: pipeline-validator
 === Ralph Loop Started: Sat Jan 10 09:11:59 CET 2026 ===
 Task: pipeline-validator
 
+US-008 is complete. Not all stories are complete yet (8 of 20 done), so the loop should continue with the next story. The next story is US-009: "Implement method to get variables from a variable group".
+I have completed **US-009: Implement method to get variables from a variable group**.
+
+**Summary of changes:**
+- Added `get_variables_in_group` method to `AzureDevOpsClient` in `src/azure.rs`
+- The method takes a `group_id: i32` parameter and returns `Result<Vec<String>>`
+- It executes `az pipelines variable-group show --id <id>` with the organization and project
+- Parses the JSON response using the existing `VariableGroupData` struct
+- Extracts and returns variable names from the `variables` HashMap
+
+**Acceptance criteria met:**
+- ✅ `get_variables_in_group` method exists with correct signature
+- ✅ Method executes 'az pipelines variable-group show' with group ID
+- ✅ Method extracts variable names from the 'variables' object in JSON response
+- ✅ Method returns `Vec<String>` of variable names
+- ✅ cargo build succeeds
+
+There are 11 more stories remaining (US-010 through US-020) with `passes: false`. The next story is US-010: "Create validation logic for variable groups".

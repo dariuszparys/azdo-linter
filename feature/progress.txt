@@ -3,8 +3,8 @@
 # Total stories: 20
 # Started: 2026-01-10
 
-Current story: 9
-Completed: 8
+Current story: 10
+Completed: 9
 
 ---
 # Story log (append completed stories below)
@@ -16,3 +16,4 @@ Completed: 8
 2026-01-10 US-006: Create function to extract variable references from pipeline YAML
 2026-01-10 US-007: Create Azure CLI wrapper struct
 2026-01-10 US-008: Implement method to fetch variable group from Azure DevOps
+2026-01-10 US-009: Implement method to get variables from a variable group
