@@ -3,8 +3,8 @@
 # Total stories: 20
 # Started: 2026-01-10
 
-Current story: 6
-Completed: 5
+Current story: 7
+Completed: 6
 
 ---
 # Story log (append completed stories below)
@@ -13,3 +13,4 @@ Completed: 5
 2026-01-10 US-003: Define core data structures for pipeline YAML
 2026-01-10 US-004: Implement YAML file parser function
 2026-01-10 US-005: Create function to extract variable group names from pipeline
+2026-01-10 US-006: Create function to extract variable references from pipeline YAML
