@@ -189,3 +189,154 @@ impl AzureDevOpsClient {
         Ok(variable_names)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_creation() {
+        let client = AzureDevOpsClient::new(
+            "https://dev.azure.com/myorg".to_string(),
+            "myproject".to_string(),
+        );
+
+        assert_eq!(client.organization, "https://dev.azure.com/myorg");
+        assert_eq!(client.project, "myproject");
+    }
+
+    #[test]
+    fn test_client_creation_with_org_name() {
+        let client = AzureDevOpsClient::new("myorg".to_string(), "myproject".to_string());
+
+        assert_eq!(client.organization, "myorg");
+        assert_eq!(client.project, "myproject");
+    }
+
+    #[test]
+    fn test_parse_variable_group_response() {
+        // Sample Azure CLI response for variable group
+        let json_response = r#"{
+            "id": 123,
+            "name": "ProductionSecrets",
+            "variables": {
+                "ConnectionString": {
+                    "value": "Server=prod.db;",
+                    "isSecret": false
+                },
+                "ApiKey": {
+                    "value": null,
+                    "isSecret": true
+                }
+            }
+        }"#;
+
+        let group_data: VariableGroupData =
+            serde_json::from_str(json_response).expect("Failed to parse JSON");
+
+        assert_eq!(group_data.id, 123);
+        assert_eq!(group_data.name, "ProductionSecrets");
+        assert_eq!(group_data.variables.len(), 2);
+
+        // Verify ConnectionString variable
+        let conn_string = group_data
+            .variables
+            .get("ConnectionString")
+            .expect("ConnectionString not found");
+        assert_eq!(conn_string.value, Some("Server=prod.db;".to_string()));
+        assert!(!conn_string.is_secret);
+
+        // Verify ApiKey variable (secret)
+        let api_key = group_data.variables.get("ApiKey").expect("ApiKey not found");
+        assert!(api_key.value.is_none());
+        assert!(api_key.is_secret);
+    }
+
+    #[test]
+    fn test_parse_variable_group_empty_variables() {
+        // Sample response with no variables
+        let json_response = r#"{
+            "id": 456,
+            "name": "EmptyGroup"
+        }"#;
+
+        let group_data: VariableGroupData =
+            serde_json::from_str(json_response).expect("Failed to parse JSON");
+
+        assert_eq!(group_data.id, 456);
+        assert_eq!(group_data.name, "EmptyGroup");
+        assert!(group_data.variables.is_empty());
+    }
+
+    #[test]
+    fn test_parse_variable_group_with_missing_optional_fields() {
+        // Response where isSecret is missing (should default to false)
+        let json_response = r#"{
+            "id": 789,
+            "name": "TestGroup",
+            "variables": {
+                "SimpleVar": {
+                    "value": "hello"
+                }
+            }
+        }"#;
+
+        let group_data: VariableGroupData =
+            serde_json::from_str(json_response).expect("Failed to parse JSON");
+
+        let simple_var = group_data
+            .variables
+            .get("SimpleVar")
+            .expect("SimpleVar not found");
+        assert_eq!(simple_var.value, Some("hello".to_string()));
+        assert!(!simple_var.is_secret); // Default value
+    }
+
+    #[test]
+    fn test_extract_variable_names_from_group_data() {
+        let json_response = r#"{
+            "id": 100,
+            "name": "MyGroup",
+            "variables": {
+                "Var1": {"value": "a"},
+                "Var2": {"value": "b"},
+                "Var3": {"value": "c"}
+            }
+        }"#;
+
+        let group_data: VariableGroupData =
+            serde_json::from_str(json_response).expect("Failed to parse JSON");
+
+        let mut variable_names: Vec<String> = group_data.variables.keys().cloned().collect();
+        variable_names.sort(); // Sort for consistent comparison
+
+        assert_eq!(variable_names.len(), 3);
+        assert_eq!(variable_names, vec!["Var1", "Var2", "Var3"]);
+    }
+
+    #[test]
+    fn test_variable_value_deserialization_with_null_value() {
+        let json_response = r#"{
+            "value": null,
+            "isSecret": true
+        }"#;
+
+        let var_value: VariableValue =
+            serde_json::from_str(json_response).expect("Failed to parse JSON");
+
+        assert!(var_value.value.is_none());
+        assert!(var_value.is_secret);
+    }
+
+    #[test]
+    fn test_variable_value_deserialization_minimal() {
+        // Minimal response with only value
+        let json_response = r#"{"value": "test-value"}"#;
+
+        let var_value: VariableValue =
+            serde_json::from_str(json_response).expect("Failed to parse JSON");
+
+        assert_eq!(var_value.value, Some("test-value".to_string()));
+        assert!(!var_value.is_secret);
+    }
+}

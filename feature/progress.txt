@@ -3,8 +3,8 @@
 # Total stories: 20
 # Started: 2026-01-10
 
-Current story: 15
-Completed: 14
+Current story: 16
+Completed: 15
 
 ---
 # Story log (append completed stories below)
@@ -22,3 +22,4 @@ Completed: 14
 2026-01-10 US-012: Define CLI argument structure with clap
 2026-01-10 US-013: Implement main CLI orchestration logic
 2026-01-10 US-014: Add error formatting and user-friendly output
+2026-01-10 US-015: Create integration test for YAML parsing
