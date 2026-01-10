@@ -45,6 +45,27 @@ get_total_stories() {
     jq '.userStories | length' "$PRD_FILE"
 }
 
+# Get completed count from progress.txt
+get_completed_count() {
+    grep "^Completed:" "$PROGRESS_FILE" | sed 's/Completed: //'
+}
+
+# Get the last completed story from the log
+get_last_completed_story() {
+    tail -1 "$PROGRESS_FILE" | grep -E "^[0-9]{4}-[0-9]{2}-[0-9]{2} US-"
+}
+
+# Display current progress
+show_progress() {
+    local completed
+    completed=$(get_completed_count)
+    local total
+    total=$(get_total_stories)
+    local percent=$((completed * 100 / total))
+
+    echo -e "${GREEN}Progress: $completed/$total stories completed ($percent%)${NC}"
+}
+
 # Check if all stories are complete
 all_stories_complete() {
     local incomplete
@@ -71,6 +92,14 @@ run_iteration() {
     else
         echo -e "${RED}Iteration $iteration failed${NC}"
     fi
+
+    # Show updated progress
+    local last_story
+    last_story=$(get_last_completed_story)
+    if [[ -n "$last_story" ]]; then
+        echo -e "${GREEN}Completed: $last_story${NC}"
+    fi
+    show_progress
 
     echo ""
 }
