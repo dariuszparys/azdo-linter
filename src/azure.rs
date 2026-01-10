@@ -126,4 +126,66 @@ impl AzureDevOpsClient {
 
         Ok(group_data)
     }
+
+    /// Get all variable names from a variable group by ID
+    ///
+    /// # Arguments
+    /// * `group_id` - The ID of the variable group
+    ///
+    /// # Returns
+    /// * `Result<Vec<String>>` - List of variable names in the group
+    pub fn get_variables_in_group(&self, group_id: i32) -> Result<Vec<String>> {
+        // Use 'az pipelines variable-group show' with the group ID
+        let output = Command::new("az")
+            .args([
+                "pipelines",
+                "variable-group",
+                "show",
+                "--id",
+                &group_id.to_string(),
+                "--organization",
+                &self.organization,
+                "--project",
+                &self.project,
+                "--output",
+                "json",
+            ])
+            .output()
+            .with_context(|| {
+                format!(
+                    "Failed to execute 'az pipelines variable-group show' for group ID {}",
+                    group_id
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "Azure CLI command failed for variable group ID {}: {}",
+                group_id,
+                stderr
+            );
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let trimmed = stdout.trim();
+
+        // Check if the result is null or empty (group not found)
+        if trimmed.is_empty() || trimmed == "null" {
+            anyhow::bail!("Variable group with ID {} not found", group_id);
+        }
+
+        // Parse the JSON response
+        let group_data: VariableGroupData = serde_json::from_str(trimmed).with_context(|| {
+            format!(
+                "Failed to parse Azure CLI response for variable group ID {}",
+                group_id
+            )
+        })?;
+
+        // Extract variable names from the variables HashMap
+        let variable_names: Vec<String> = group_data.variables.keys().cloned().collect();
+
+        Ok(variable_names)
+    }
 }
