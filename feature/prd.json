@@ -1,0 +1,363 @@
+{
+  "projectName": "pipeline-validator",
+  "branchName": "ralph/pipeline-validator",
+  "taskDescription": "Build Azure DevOps pipeline YAML validator that checks variable groups and variables exist",
+  "projectContext": {
+    "framework": "Rust/Cargo",
+    "language": "Rust 1.88.0",
+    "buildCommand": "cargo build",
+    "testCommand": "cargo test",
+    "currentState": "Greenfield - Hello World application"
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add core dependencies to Cargo.toml",
+      "description": "Add essential dependencies for YAML parsing, CLI, and JSON handling. Add serde with derive feature, serde_yaml for Azure DevOps YAML parsing, serde_json for parsing Azure CLI JSON responses, clap with derive feature for CLI argument parsing, and anyhow for error handling.",
+      "acceptanceCriteria": [
+        "serde (with derive feature) added to dependencies",
+        "serde_yaml added to dependencies",
+        "serde_json added to dependencies",
+        "clap (with derive feature) added to dependencies",
+        "anyhow added to dependencies",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use serde = { version = \"1.0\", features = [\"derive\"] }, serde_yaml = \"0.9\", serde_json = \"1.0\", clap = { version = \"4.0\", features = [\"derive\"] }, anyhow = \"1.0\"",
+      "dependencies": [],
+      "priority": 1,
+      "estimatedComplexity": "low",
+      "passes": false
+    },
+    {
+      "id": "US-002",
+      "title": "Create project module structure",
+      "description": "Create the module structure with lib.rs and organize code into modules: parser (for YAML parsing), azure (for Azure CLI integration), validator (for validation logic), and error (for error types). Create empty module files with basic module declarations.",
+      "acceptanceCriteria": [
+        "src/lib.rs exists with module declarations",
+        "src/parser.rs exists with module stub",
+        "src/azure.rs exists with module stub",
+        "src/validator.rs exists with module stub",
+        "src/error.rs exists with module stub",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Create lib.rs with: pub mod parser; pub mod azure; pub mod validator; pub mod error;",
+      "dependencies": ["US-001"],
+      "priority": 2,
+      "estimatedComplexity": "low",
+      "passes": false
+    },
+    {
+      "id": "US-003",
+      "title": "Define core data structures for pipeline YAML",
+      "description": "Create data structures in parser.rs to represent Azure DevOps pipeline YAML structure. Define structs for Pipeline (top-level), VariableGroup (groups referenced), and Variable (individual variables). Use serde derive macros for deserialization. Focus on the minimal structure needed to extract variable group references.",
+      "acceptanceCriteria": [
+        "Pipeline struct defined with variables field",
+        "VariableGroup struct defined with group and variables fields",
+        "Variable struct defined with name and value fields",
+        "Structs derive Deserialize and Debug",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Azure DevOps YAML has 'variables' key that can contain both inline variables and group references. Group references look like: variables: - group: 'GroupName'. Need to support both formats.",
+      "dependencies": ["US-002"],
+      "priority": 3,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-004",
+      "title": "Implement YAML file parser function",
+      "description": "Create a parse_pipeline_file function in parser.rs that takes a file path, reads the YAML file, and deserializes it into the Pipeline struct. Return Result<Pipeline, anyhow::Error> for error handling.",
+      "acceptanceCriteria": [
+        "parse_pipeline_file function exists with signature fn parse_pipeline_file(path: &str) -> Result<Pipeline, anyhow::Error>",
+        "Function reads file using std::fs",
+        "Function deserializes YAML using serde_yaml",
+        "Function returns appropriate errors for file I/O and YAML parsing issues",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use std::fs::read_to_string for file reading and serde_yaml::from_str for parsing. Wrap errors with anyhow::Context for better error messages.",
+      "dependencies": ["US-003"],
+      "priority": 4,
+      "estimatedComplexity": "low",
+      "passes": false
+    },
+    {
+      "id": "US-005",
+      "title": "Create function to extract variable group names from pipeline",
+      "description": "Add a method or function to extract all variable group names referenced in a Pipeline struct. This should iterate through the variables section and collect all group names into a Vec<String>.",
+      "acceptanceCriteria": [
+        "Function exists to extract variable group names from Pipeline",
+        "Function returns Vec<String> of unique group names",
+        "Function handles both inline variables and group references",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Implement as impl block method on Pipeline: impl Pipeline { pub fn get_variable_groups(&self) -> Vec<String> }. Filter for group references vs inline variables.",
+      "dependencies": ["US-004"],
+      "priority": 5,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-006",
+      "title": "Create function to extract variable references from pipeline YAML",
+      "description": "Add functionality to extract all variable references (using $(variableName) syntax) from the pipeline YAML. This should search through pipeline steps, scripts, and other fields that may contain variable references and return a Vec<String> of variable names.",
+      "acceptanceCriteria": [
+        "Function exists to extract variable references using regex or string parsing",
+        "Function finds variables in $(variableName) format",
+        "Function returns Vec<String> of unique variable names",
+        "Function handles nested structures in YAML",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use regex to find $(variableName) patterns. Regex pattern: \\$\\(([^)]+)\\). May need to extend Pipeline struct to capture more fields like stages, jobs, steps.",
+      "dependencies": ["US-005"],
+      "priority": 6,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-007",
+      "title": "Create Azure CLI wrapper struct",
+      "description": "Create an AzureDevOpsClient struct in azure.rs that wraps calls to the Azure CLI. Include a method to check if Azure CLI is available and configured. Store organization and project information.",
+      "acceptanceCriteria": [
+        "AzureDevOpsClient struct defined with org and project fields",
+        "new() constructor method exists",
+        "check_cli_available() method exists that runs 'az --version'",
+        "Struct uses std::process::Command for CLI execution",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use std::process::Command to execute 'az --version'. Check exit status to verify Azure CLI is installed and available.",
+      "dependencies": ["US-002"],
+      "priority": 7,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-008",
+      "title": "Implement method to fetch variable group from Azure DevOps",
+      "description": "Add get_variable_group method to AzureDevOpsClient that calls 'az pipelines variable-group list' and 'az pipelines variable-group show' to fetch a specific variable group by name. Parse the JSON response and return the variable group data.",
+      "acceptanceCriteria": [
+        "get_variable_group method exists with signature fn get_variable_group(&self, group_name: &str) -> Result<VariableGroupData>",
+        "Method executes 'az pipelines variable-group list' with appropriate filters",
+        "Method parses JSON output using serde_json",
+        "Method returns structured data about the variable group",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use Command::output() to capture stdout. Parse JSON response. Azure CLI commands: 'az pipelines variable-group list --organization <org> --project <project> --query \"[?name=='<group_name>']\"'. Define VariableGroupData struct to hold the response.",
+      "dependencies": ["US-007"],
+      "priority": 8,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-009",
+      "title": "Implement method to get variables from a variable group",
+      "description": "Add get_variables_in_group method to AzureDevOpsClient that fetches all variables defined in a specific variable group. Use 'az pipelines variable-group show' with the group ID and parse the variables from the JSON response.",
+      "acceptanceCriteria": [
+        "get_variables_in_group method exists with signature fn get_variables_in_group(&self, group_id: i32) -> Result<Vec<String>>",
+        "Method executes 'az pipelines variable-group show' with group ID",
+        "Method extracts variable names from the 'variables' object in JSON response",
+        "Method returns Vec<String> of variable names",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Azure CLI command: 'az pipelines variable-group show --id <id> --organization <org> --project <project>'. Variables are in 'variables' object as key-value pairs - extract keys only.",
+      "dependencies": ["US-008"],
+      "priority": 9,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-010",
+      "title": "Create validation logic for variable groups",
+      "description": "Implement validate_variable_groups function in validator.rs that takes a list of variable group names from the pipeline and checks if each exists in Azure DevOps using the AzureDevOpsClient. Return validation results indicating which groups exist and which don't.",
+      "acceptanceCriteria": [
+        "validate_variable_groups function exists",
+        "Function takes Vec<String> of group names and AzureDevOpsClient reference",
+        "Function returns Result with validation results",
+        "Function checks existence of each variable group",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Define ValidationResult struct with fields for group_name, exists: bool, and optional error message. Return Vec<ValidationResult>.",
+      "dependencies": ["US-009"],
+      "priority": 10,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-011",
+      "title": "Create validation logic for variables in groups",
+      "description": "Implement validate_variables function in validator.rs that checks if variables referenced in the pipeline actually exist in their respective variable groups. Cross-reference extracted variable names with variables available in each group.",
+      "acceptanceCriteria": [
+        "validate_variables function exists",
+        "Function takes variable references and variable group data",
+        "Function returns validation results for each variable",
+        "Function identifies which variables are missing from which groups",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "This requires matching variable names to their source groups. May need heuristics or assume variables come from referenced groups. Return struct with variable_name, group_name, exists: bool.",
+      "dependencies": ["US-010"],
+      "priority": 11,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-012",
+      "title": "Define CLI argument structure with clap",
+      "description": "Update main.rs to define CLI arguments using clap derive macros. Add arguments for: pipeline file path (required), Azure DevOps organization (required), project name (required), and optional verbose flag.",
+      "acceptanceCriteria": [
+        "Args struct defined with clap derive macros",
+        "pipeline_file field with required path argument",
+        "organization field for Azure DevOps org",
+        "project field for Azure DevOps project",
+        "verbose bool flag field",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use #[derive(Parser)] and #[command] attributes from clap. Structure: #[derive(Parser)] struct Args { #[arg(short, long)] pipeline_file: String, ... }",
+      "dependencies": ["US-001"],
+      "priority": 12,
+      "estimatedComplexity": "low",
+      "passes": false
+    },
+    {
+      "id": "US-013",
+      "title": "Implement main CLI orchestration logic",
+      "description": "Update main() function to orchestrate the validation workflow: parse CLI args, load and parse the pipeline file, initialize Azure DevOps client, run validations, and output results. Return appropriate exit codes (0 for success, 1 for validation failures, 2 for errors).",
+      "acceptanceCriteria": [
+        "main() function parses CLI arguments",
+        "main() calls parse_pipeline_file with provided path",
+        "main() initializes AzureDevOpsClient with org and project",
+        "main() calls validation functions",
+        "main() outputs human-readable results",
+        "main() returns proper exit codes",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use std::process::exit() for exit codes. Structure with Result<()> return and ? operator for error propagation. Call validation functions in sequence and collect results.",
+      "dependencies": ["US-011", "US-012"],
+      "priority": 13,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-014",
+      "title": "Add error formatting and user-friendly output",
+      "description": "Enhance error.rs with custom error types and implement Display trait for better error messages. Update main.rs to format validation results in a clear, actionable format showing which variable groups and variables passed or failed validation.",
+      "acceptanceCriteria": [
+        "Custom error types defined in error.rs",
+        "Error types implement Display and Error traits",
+        "Validation results formatted with clear pass/fail indicators",
+        "Error messages include context and suggestions",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Consider using colored output (optional dependency) for better readability. Format should show: checkmark for success, X for failures, with group and variable names clearly listed.",
+      "dependencies": ["US-013"],
+      "priority": 14,
+      "estimatedComplexity": "low",
+      "passes": false
+    },
+    {
+      "id": "US-015",
+      "title": "Create integration test for YAML parsing",
+      "description": "Create tests/integration_tests.rs with test cases for parsing sample Azure DevOps pipeline YAML files. Include test fixtures with various pipeline structures: pipelines with variable groups, pipelines with inline variables, and pipelines with both.",
+      "acceptanceCriteria": [
+        "tests/ directory exists",
+        "integration_tests.rs created with test module",
+        "Sample YAML fixtures created in tests/fixtures/",
+        "Tests verify parse_pipeline_file works correctly",
+        "Tests verify variable group extraction",
+        "cargo test passes"
+      ],
+      "technicalNotes": "Create tests/fixtures/ directory with sample .yml files. Test should use #[test] macro and assert expected Pipeline structure. Example fixture: pipeline with 'variables: - group: TestGroup'.",
+      "dependencies": ["US-006"],
+      "priority": 15,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-016",
+      "title": "Create unit tests for Azure CLI wrapper",
+      "description": "Add unit tests in azure.rs module for AzureDevOpsClient. Mock Azure CLI responses or create tests that verify command construction without actually calling Azure CLI (check commands are correctly formatted).",
+      "acceptanceCriteria": [
+        "Unit tests module exists in azure.rs with #[cfg(test)]",
+        "Tests verify command construction for variable group queries",
+        "Tests verify JSON parsing from sample Azure CLI responses",
+        "Tests handle error cases",
+        "cargo test passes"
+      ],
+      "technicalNotes": "Use #[cfg(test)] mod tests { } for inline tests. Mock JSON responses as string literals. Test command arguments are correctly constructed with org, project, and group names.",
+      "dependencies": ["US-009"],
+      "priority": 16,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-017",
+      "title": "Create unit tests for validation logic",
+      "description": "Add unit tests in validator.rs for validation functions. Test scenarios: all groups exist, some groups missing, all variables exist, some variables missing, empty variable groups.",
+      "acceptanceCriteria": [
+        "Unit tests module exists in validator.rs",
+        "Tests cover validate_variable_groups function",
+        "Tests cover validate_variables function",
+        "Tests verify correct ValidationResult output",
+        "cargo test passes"
+      ],
+      "technicalNotes": "Create mock data structures to simulate Azure DevOps responses. Test edge cases like empty lists, nonexistent groups, and malformed data.",
+      "dependencies": ["US-011"],
+      "priority": 17,
+      "estimatedComplexity": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-018",
+      "title": "Add README with usage instructions",
+      "description": "Create README.md with project description, prerequisites (Azure CLI with DevOps extension), installation instructions, usage examples, and example output. Include information about exit codes and error handling.",
+      "acceptanceCriteria": [
+        "README.md exists in project root",
+        "Prerequisites section lists Azure CLI requirements",
+        "Installation section shows cargo install steps",
+        "Usage section has example commands",
+        "Exit codes documented",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Example usage: azdo-linter --pipeline-file azure-pipelines.yml --organization myorg --project myproject. Document exit codes: 0=success, 1=validation failures, 2=errors.",
+      "dependencies": ["US-014"],
+      "priority": 18,
+      "estimatedComplexity": "low",
+      "passes": false
+    },
+    {
+      "id": "US-019",
+      "title": "Add CI/CD configuration for cross-platform testing",
+      "description": "Create .github/workflows/ci.yml (or similar CI config) to run tests and build on Windows, macOS, and Linux. Ensure cargo build and cargo test run successfully on all platforms.",
+      "acceptanceCriteria": [
+        ".github/workflows/ci.yml exists",
+        "CI runs on Windows, macOS, and Linux",
+        "CI runs cargo build",
+        "CI runs cargo test",
+        "CI runs cargo clippy for linting",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Use GitHub Actions with matrix strategy for os: [ubuntu-latest, windows-latest, macos-latest]. Include clippy for Rust linting: cargo clippy -- -D warnings.",
+      "dependencies": ["US-017"],
+      "priority": 19,
+      "estimatedComplexity": "low",
+      "passes": false
+    },
+    {
+      "id": "US-020",
+      "title": "Add Cargo.toml metadata for publishing",
+      "description": "Update Cargo.toml with complete package metadata: description, authors, license, repository URL, keywords, and categories. Prepare for potential crates.io publishing.",
+      "acceptanceCriteria": [
+        "description field added to Cargo.toml",
+        "authors field added",
+        "license field added (e.g., MIT or Apache-2.0)",
+        "repository field with git URL",
+        "keywords field with relevant terms",
+        "categories field with relevant categories",
+        "cargo build succeeds"
+      ],
+      "technicalNotes": "Keywords: [\"azure-devops\", \"pipeline\", \"validation\", \"yaml\", \"ci-cd\"]. Categories: [\"command-line-utilities\", \"development-tools\"]. License: Choose MIT or Apache-2.0.",
+      "dependencies": ["US-001"],
+      "priority": 20,
+      "estimatedComplexity": "low",
+      "passes": false
+    }
+  ]
+}

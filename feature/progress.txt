@@ -1,0 +1,10 @@
+# Progress: pipeline-validator
+# Branch: ralph/pipeline-validator
+# Total stories: 20
+# Started: 2026-01-10
+
+Current story: 1
+Completed: 0
+
+---
+# Story log (append completed stories below)
