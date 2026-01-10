@@ -16,6 +16,17 @@ pub struct GroupValidationResult {
     pub group_id: Option<i32>,
 }
 
+/// Source of a validated variable
+#[derive(Debug, Clone, PartialEq)]
+pub enum VariableSource {
+    /// Variable found in a variable group
+    Group(String),
+    /// Variable defined inline in the pipeline
+    Inline,
+    /// Variable not found
+    NotFound,
+}
+
 /// Result of validating a single variable reference
 #[derive(Debug)]
 pub struct VariableValidationResult {
@@ -27,6 +38,8 @@ pub struct VariableValidationResult {
     pub exists: bool,
     /// Optional error message if validation failed
     pub error: Option<String>,
+    /// Source of the variable (group, inline, or not found)
+    pub source: VariableSource,
 }
 
 /// Validate that variable groups exist in Azure DevOps
@@ -64,11 +77,12 @@ pub fn validate_variable_groups(
     Ok(results)
 }
 
-/// Validate that variables referenced in the pipeline exist in the variable groups
+/// Validate that variables referenced in the pipeline exist in the variable groups or are defined inline
 ///
 /// # Arguments
 /// * `variable_references` - List of variable names referenced in the pipeline (using $(variableName) syntax)
 /// * `group_validation_results` - Results from validating variable groups (contains group IDs)
+/// * `inline_variables` - List of variable names defined inline in the pipeline
 /// * `client` - Azure DevOps client for API calls
 ///
 /// # Returns
@@ -76,6 +90,7 @@ pub fn validate_variable_groups(
 pub fn validate_variables(
     variable_references: Vec<String>,
     group_validation_results: &[GroupValidationResult],
+    inline_variables: &[String],
     client: &AzureDevOpsClient,
 ) -> Result<Vec<VariableValidationResult>> {
     // Collect all available variables from all existing groups
@@ -102,6 +117,18 @@ pub fn validate_variables(
     let mut results = Vec::new();
 
     for var_name in variable_references {
+        // First check if it's an inline variable
+        if inline_variables.contains(&var_name) {
+            results.push(VariableValidationResult {
+                variable_name: var_name,
+                group_name: None,
+                exists: true,
+                error: None,
+                source: VariableSource::Inline,
+            });
+            continue;
+        }
+
         // Search for the variable in all available groups
         let found = available_variables
             .iter()
@@ -113,12 +140,14 @@ pub fn validate_variables(
                 group_name: Some(group_name.clone()),
                 exists: true,
                 error: None,
+                source: VariableSource::Group(group_name.clone()),
             },
             None => VariableValidationResult {
                 variable_name: var_name,
                 group_name: None,
                 exists: false,
                 error: Some("Variable not found in any referenced variable group".to_string()),
+                source: VariableSource::NotFound,
             },
         };
         results.push(result);
@@ -133,9 +162,31 @@ pub fn validate_variables_against_available(
     variable_references: Vec<String>,
     available_variables: &[(String, String)], // (variable_name, group_name)
 ) -> Vec<VariableValidationResult> {
+    validate_variables_against_available_with_inline(variable_references, available_variables, &[])
+}
+
+/// Helper function to validate variables against pre-fetched available variables and inline variables
+/// This is used for testing without needing to call Azure CLI
+pub fn validate_variables_against_available_with_inline(
+    variable_references: Vec<String>,
+    available_variables: &[(String, String)], // (variable_name, group_name)
+    inline_variables: &[String],
+) -> Vec<VariableValidationResult> {
     let mut results = Vec::new();
 
     for var_name in variable_references {
+        // First check if it's an inline variable
+        if inline_variables.contains(&var_name) {
+            results.push(VariableValidationResult {
+                variable_name: var_name,
+                group_name: None,
+                exists: true,
+                error: None,
+                source: VariableSource::Inline,
+            });
+            continue;
+        }
+
         let found = available_variables
             .iter()
             .find(|(name, _)| name == &var_name);
@@ -146,12 +197,14 @@ pub fn validate_variables_against_available(
                 group_name: Some(group_name.clone()),
                 exists: true,
                 error: None,
+                source: VariableSource::Group(group_name.clone()),
             },
             None => VariableValidationResult {
                 variable_name: var_name,
                 group_name: None,
                 exists: false,
                 error: Some("Variable not found in any referenced variable group".to_string()),
+                source: VariableSource::NotFound,
             },
         };
         results.push(result);
@@ -203,12 +256,14 @@ mod tests {
             group_name: Some("Secrets".to_string()),
             exists: true,
             error: None,
+            source: VariableSource::Group("Secrets".to_string()),
         };
 
         assert_eq!(result.variable_name, "ApiKey");
         assert_eq!(result.group_name, Some("Secrets".to_string()));
         assert!(result.exists);
         assert!(result.error.is_none());
+        assert_eq!(result.source, VariableSource::Group("Secrets".to_string()));
     }
 
     #[test]
@@ -218,12 +273,31 @@ mod tests {
             group_name: None,
             exists: false,
             error: Some("Variable not found".to_string()),
+            source: VariableSource::NotFound,
         };
 
         assert_eq!(result.variable_name, "MissingVar");
         assert!(result.group_name.is_none());
         assert!(!result.exists);
         assert!(result.error.is_some());
+        assert_eq!(result.source, VariableSource::NotFound);
+    }
+
+    #[test]
+    fn test_variable_validation_result_inline() {
+        let result = VariableValidationResult {
+            variable_name: "BuildConfig".to_string(),
+            group_name: None,
+            exists: true,
+            error: None,
+            source: VariableSource::Inline,
+        };
+
+        assert_eq!(result.variable_name, "BuildConfig");
+        assert!(result.group_name.is_none());
+        assert!(result.exists);
+        assert!(result.error.is_none());
+        assert_eq!(result.source, VariableSource::Inline);
     }
 
     // Tests for validate_variables_against_available function
@@ -364,5 +438,60 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(results[0].exists); // Exact match
         assert!(!results[1].exists); // Case mismatch - not found
+    }
+
+    #[test]
+    fn test_validate_inline_variables() {
+        let available = vec![
+            ("GroupVar".to_string(), "Group1".to_string()),
+        ];
+
+        let inline = vec![
+            "InlineVar1".to_string(),
+            "InlineVar2".to_string(),
+        ];
+
+        let references = vec![
+            "GroupVar".to_string(),
+            "InlineVar1".to_string(),
+            "MissingVar".to_string(),
+        ];
+
+        let results = validate_variables_against_available_with_inline(references, &available, &inline);
+
+        assert_eq!(results.len(), 3);
+
+        // First variable should be from group
+        assert!(results[0].exists);
+        assert_eq!(results[0].source, VariableSource::Group("Group1".to_string()));
+
+        // Second variable should be inline
+        assert!(results[1].exists);
+        assert_eq!(results[1].source, VariableSource::Inline);
+
+        // Third variable should be missing
+        assert!(!results[2].exists);
+        assert_eq!(results[2].source, VariableSource::NotFound);
+    }
+
+    #[test]
+    fn test_inline_takes_precedence_over_group() {
+        // If a variable is both inline and in a group, inline should take precedence
+        let available = vec![
+            ("SharedVar".to_string(), "Group1".to_string()),
+        ];
+
+        let inline = vec![
+            "SharedVar".to_string(),
+        ];
+
+        let references = vec!["SharedVar".to_string()];
+
+        let results = validate_variables_against_available_with_inline(references, &available, &inline);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].exists);
+        // Should be marked as inline, not group
+        assert_eq!(results[0].source, VariableSource::Inline);
     }
 }

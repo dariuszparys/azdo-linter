@@ -4,7 +4,7 @@ use std::process;
 use azdo_linter::azure::AzureDevOpsClient;
 use azdo_linter::error::OutputFormatter;
 use azdo_linter::parser::{extract_variable_references, parse_pipeline_file};
-use azdo_linter::validator::{validate_variable_groups, validate_variables};
+use azdo_linter::validator::{validate_variable_groups, validate_variables, VariableSource};
 
 /// Azure DevOps pipeline YAML validator
 ///
@@ -75,7 +75,7 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
     }
     let pipeline = parse_pipeline_file(&args.pipeline_file)?;
 
-    // Extract variable groups from the pipeline
+    // Extract variable groups from the pipeline (searches all levels: top, stage, job)
     let variable_groups = pipeline.get_variable_groups();
     if args.verbose {
         println!("{}", OutputFormatter::info(&format!("Found {} variable group(s) referenced", variable_groups.len())));
@@ -84,12 +84,22 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
         }
     }
 
+    // Extract inline variables defined in the pipeline
+    let inline_variables = pipeline.get_inline_variable_names();
+    if args.verbose {
+        println!("{}", OutputFormatter::info(&format!("Found {} inline variable(s) defined", inline_variables.len())));
+        for var in &inline_variables {
+            println!("       - {}", var);
+        }
+    }
+
     // Extract variable references from the pipeline
+    // (excludes PowerShell expressions, system variables, and runtime outputs)
     let variable_references = extract_variable_references(&args.pipeline_file)?;
     if args.verbose {
         println!(
             "{}",
-            OutputFormatter::info(&format!("Found {} variable reference(s) in pipeline", variable_references.len()))
+            OutputFormatter::info(&format!("Found {} variable reference(s) to validate", variable_references.len()))
         );
         for var in &variable_references {
             println!("       - $({})", var);
@@ -144,8 +154,8 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
 
     println!("{}", OutputFormatter::section("Variable References"));
 
-    // Validate variables exist in groups
-    let variable_results = validate_variables(variable_references, &group_results, &client)?;
+    // Validate variables exist in groups or are defined inline
+    let variable_results = validate_variables(variable_references, &group_results, &inline_variables, &client)?;
 
     // Track counts for summary
     let mut var_pass_count = 0;
@@ -155,13 +165,23 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
     for result in &variable_results {
         if result.exists {
             var_pass_count += 1;
-            if let Some(ref group_name) = result.group_name {
-                println!(
-                    "{}",
-                    OutputFormatter::success(&format!("Variable '{}' found in group '{}'", result.variable_name, group_name))
-                );
-            } else {
-                println!("{}", OutputFormatter::success(&format!("Variable '{}' found", result.variable_name)));
+            match &result.source {
+                VariableSource::Group(group_name) => {
+                    println!(
+                        "{}",
+                        OutputFormatter::success(&format!("Variable '{}' found in group '{}'", result.variable_name, group_name))
+                    );
+                }
+                VariableSource::Inline => {
+                    println!(
+                        "{}",
+                        OutputFormatter::success(&format!("Variable '{}' defined inline in pipeline", result.variable_name))
+                    );
+                }
+                VariableSource::NotFound => {
+                    // This shouldn't happen if exists is true, but handle it gracefully
+                    println!("{}", OutputFormatter::success(&format!("Variable '{}' found", result.variable_name)));
+                }
             }
         } else {
             var_fail_count += 1;

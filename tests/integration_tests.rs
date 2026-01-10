@@ -126,3 +126,87 @@ fn test_variable_groups_are_unique() {
 
     assert_eq!(groups.len(), unique_count, "Variable groups should be unique");
 }
+
+/// Test parsing a pipeline with stage-level variable groups
+#[test]
+fn test_parse_pipeline_with_stage_level_groups() {
+    let path = "tests/fixtures/pipeline_with_stages.yml";
+    let pipeline = parse_pipeline_file(path).expect("Failed to parse pipeline file");
+
+    // Should find 3 variable groups from different levels:
+    // - build-secrets (stage level)
+    // - job-level-group (job level)
+    // - deploy-secrets (stage level)
+    let groups = pipeline.get_variable_groups();
+    assert_eq!(groups.len(), 3);
+    assert!(groups.contains(&"build-secrets".to_string()));
+    assert!(groups.contains(&"job-level-group".to_string()));
+    assert!(groups.contains(&"deploy-secrets".to_string()));
+}
+
+/// Test inline variable extraction from stage-level definitions
+#[test]
+fn test_inline_variables_from_stages() {
+    let path = "tests/fixtures/pipeline_with_stages.yml";
+    let pipeline = parse_pipeline_file(path).expect("Failed to parse pipeline file");
+
+    // Should find inline variables from top level and stage level:
+    // - platformBuildNumber (top level)
+    // - buildConfig (stage level)
+    let inline_vars = pipeline.get_inline_variable_names();
+    assert_eq!(inline_vars.len(), 2);
+    assert!(inline_vars.contains(&"platformBuildNumber".to_string()));
+    assert!(inline_vars.contains(&"buildConfig".to_string()));
+}
+
+/// Test that PowerShell expressions are filtered from variable references
+#[test]
+fn test_filter_powershell_expressions() {
+    let path = "tests/fixtures/pipeline_with_filtering.yml";
+    let var_refs = extract_variable_references(path).expect("Failed to extract variable references");
+
+    // Should NOT contain PowerShell expressions
+    assert!(!var_refs.iter().any(|v| v.starts_with('$')));
+    assert!(!var_refs.contains(&"$outputs.registryName.value".to_string()));
+    assert!(!var_refs.contains(&"$env:MY_VAR".to_string()));
+}
+
+/// Test that system variables are filtered from variable references
+#[test]
+fn test_filter_system_variables() {
+    let path = "tests/fixtures/pipeline_with_filtering.yml";
+    let var_refs = extract_variable_references(path).expect("Failed to extract variable references");
+
+    // Should NOT contain system variables
+    assert!(!var_refs.contains(&"Build.BuildNumber".to_string()));
+    assert!(!var_refs.contains(&"System.DefaultWorkingDirectory".to_string()));
+    assert!(!var_refs.contains(&"Agent.MachineName".to_string()));
+    assert!(!var_refs.contains(&"Pipeline.Workspace".to_string()));
+}
+
+/// Test that runtime output variables are filtered from variable references
+#[test]
+fn test_filter_runtime_output_variables() {
+    let path = "tests/fixtures/pipeline_with_filtering.yml";
+    let var_refs = extract_variable_references(path).expect("Failed to extract variable references");
+
+    // Should NOT contain runtime output variables
+    assert!(!var_refs.contains(&"outputs.registryName".to_string()));
+    assert!(!var_refs.contains(&"agentIp.value".to_string()));
+    assert!(!var_refs.contains(&"domains.domainId".to_string()));
+}
+
+/// Test that regular variables are still extracted after filtering
+#[test]
+fn test_regular_variables_extracted_with_filtering() {
+    let path = "tests/fixtures/pipeline_with_filtering.yml";
+    let var_refs = extract_variable_references(path).expect("Failed to extract variable references");
+
+    // Should contain regular custom variables
+    assert!(var_refs.contains(&"customVar".to_string()));
+    assert!(var_refs.contains(&"ApiKey".to_string()));
+    assert!(var_refs.contains(&"ConnectionString".to_string()));
+
+    // Should have exactly 3 variables (all the regular ones)
+    assert_eq!(var_refs.len(), 3, "Should only have 3 regular variables after filtering");
+}

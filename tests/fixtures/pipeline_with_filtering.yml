@@ -1,0 +1,42 @@
+trigger: none
+
+variables:
+  - name: customVar
+    value: "myValue"
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          # Regular variable - should be validated
+          - script: echo "Custom: $(customVar)"
+
+          # PowerShell expressions - should be skipped
+          - task: AzureCLI@2
+            inputs:
+              inlineScript: |
+                Write-Host "##vso[task.setvariable variable=output]$($outputs.registryName.value)"
+                Write-Host "Env: $($env:MY_VAR)"
+
+          # System variables - should be skipped
+          - script: |
+              echo "Build number: $(Build.BuildNumber)"
+              echo "Working dir: $(System.DefaultWorkingDirectory)"
+              echo "Agent: $(Agent.MachineName)"
+              echo "Pipeline: $(Pipeline.Workspace)"
+
+          # Runtime output variables - should be skipped
+          - script: |
+              echo "Output: $(outputs.registryName)"
+              echo "IP: $(agentIp.value)"
+              echo "Domain: $(domains.domainId)"
+
+          # Template expressions - should be skipped
+          - script: |
+              echo "From template: $[variables.someVar]"
+
+          # Regular variables that should be validated
+          - script: |
+              echo "API Key: $(ApiKey)"
+              echo "Connection: $(ConnectionString)"

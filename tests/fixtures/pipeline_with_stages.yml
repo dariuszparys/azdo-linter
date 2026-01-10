@@ -1,0 +1,31 @@
+trigger: none
+
+variables:
+  - name: platformBuildNumber
+    value: "platform-services"
+
+stages:
+  - stage: Build
+    variables:
+      - group: build-secrets
+      - name: buildConfig
+        value: "Release"
+    jobs:
+      - job: BuildJob
+        variables:
+          - group: job-level-group
+        steps:
+          - script: |
+              echo "Building $(buildConfig)"
+              echo "Using $(platformBuildNumber)"
+              echo "Connection: $(ConnectionString)"
+
+  - stage: Deploy
+    variables:
+      - group: deploy-secrets
+    jobs:
+      - job: DeployJob
+        steps:
+          - script: |
+              echo "Deploying with $(DeployToken)"
+              echo "To environment $(Environment)"
