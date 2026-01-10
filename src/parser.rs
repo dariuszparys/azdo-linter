@@ -1,6 +1,7 @@
 //! YAML parser for Azure DevOps pipeline files
 
 use anyhow::{Context, Result};
+use regex::Regex;
 use serde::Deserialize;
 use std::fs;
 
@@ -84,4 +85,48 @@ pub fn parse_pipeline_file(path: &str) -> Result<Pipeline> {
         .with_context(|| format!("Failed to parse YAML in pipeline file: {}", path))?;
 
     Ok(pipeline)
+}
+
+/// Extract all variable references from pipeline YAML content
+///
+/// Finds all occurrences of $(variableName) syntax in the YAML content
+/// and returns a unique list of variable names.
+///
+/// # Arguments
+/// * `path` - Path to the YAML pipeline file
+///
+/// # Returns
+/// * `Result<Vec<String>>` - Unique list of variable names referenced
+pub fn extract_variable_references(path: &str) -> Result<Vec<String>> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read pipeline file: {}", path))?;
+
+    extract_variable_references_from_content(&content)
+}
+
+/// Extract variable references from raw YAML content string
+///
+/// # Arguments
+/// * `content` - Raw YAML content
+///
+/// # Returns
+/// * `Result<Vec<String>>` - Unique list of variable names referenced
+pub fn extract_variable_references_from_content(content: &str) -> Result<Vec<String>> {
+    // Regex pattern to match $(variableName) syntax
+    // Captures the variable name inside the parentheses
+    let re = Regex::new(r"\$\(([^)]+)\)")
+        .with_context(|| "Failed to compile variable reference regex")?;
+
+    let mut variables = Vec::new();
+
+    for cap in re.captures_iter(content) {
+        if let Some(var_name) = cap.get(1) {
+            let name = var_name.as_str().to_string();
+            if !variables.contains(&name) {
+                variables.push(name);
+            }
+        }
+    }
+
+    Ok(variables)
 }
