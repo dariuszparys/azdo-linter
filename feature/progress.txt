@@ -3,8 +3,9 @@
 # Total stories: 20
 # Started: 2026-01-10
 
-Current story: 1
-Completed: 0
+Current story: 2
+Completed: 1
 
 ---
 # Story log (append completed stories below)
+2026-01-10 US-001: Add core dependencies to Cargo.toml
