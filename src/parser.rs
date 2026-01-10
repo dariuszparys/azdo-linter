@@ -1,6 +1,8 @@
 //! YAML parser for Azure DevOps pipeline files
 
+use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::fs;
 
 /// Represents a variable group reference in the pipeline
 #[derive(Debug, Deserialize)]
@@ -43,4 +45,21 @@ pub struct Pipeline {
     /// Variables section containing both inline variables and group references
     #[serde(default)]
     pub variables: Option<Vec<VariableEntry>>,
+}
+
+/// Parse a pipeline YAML file and return the Pipeline structure
+///
+/// # Arguments
+/// * `path` - Path to the YAML pipeline file
+///
+/// # Returns
+/// * `Result<Pipeline>` - Parsed pipeline or error
+pub fn parse_pipeline_file(path: &str) -> Result<Pipeline> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read pipeline file: {}", path))?;
+
+    let pipeline: Pipeline = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse YAML in pipeline file: {}", path))?;
+
+    Ok(pipeline)
 }
