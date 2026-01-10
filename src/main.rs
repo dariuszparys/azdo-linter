@@ -2,6 +2,7 @@ use clap::Parser;
 use std::process;
 
 use azdo_linter::azure::AzureDevOpsClient;
+use azdo_linter::error::OutputFormatter;
 use azdo_linter::parser::{extract_variable_references, parse_pipeline_file};
 use azdo_linter::validator::{validate_variable_groups, validate_variables};
 
@@ -70,16 +71,16 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
 
     // Parse the pipeline file
     if args.verbose {
-        println!("Parsing pipeline file: {}", args.pipeline_file);
+        println!("{}", OutputFormatter::info(&format!("Parsing pipeline file: {}", args.pipeline_file)));
     }
     let pipeline = parse_pipeline_file(&args.pipeline_file)?;
 
     // Extract variable groups from the pipeline
     let variable_groups = pipeline.get_variable_groups();
     if args.verbose {
-        println!("Found {} variable group(s) referenced", variable_groups.len());
+        println!("{}", OutputFormatter::info(&format!("Found {} variable group(s) referenced", variable_groups.len())));
         for group in &variable_groups {
-            println!("  - {}", group);
+            println!("       - {}", group);
         }
     }
 
@@ -87,11 +88,11 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
     let variable_references = extract_variable_references(&args.pipeline_file)?;
     if args.verbose {
         println!(
-            "Found {} variable reference(s) in pipeline",
-            variable_references.len()
+            "{}",
+            OutputFormatter::info(&format!("Found {} variable reference(s) in pipeline", variable_references.len()))
         );
         for var in &variable_references {
-            println!("  - $({})", var);
+            println!("       - $({})", var);
         }
     }
 
@@ -100,90 +101,95 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
 
     // Check Azure CLI availability
     if args.verbose {
-        println!("Checking Azure CLI availability...");
+        println!("{}", OutputFormatter::info("Checking Azure CLI availability..."));
     }
     client.check_cli_available()?;
     if args.verbose {
-        println!("Azure CLI is available");
+        println!("{}", OutputFormatter::success("Azure CLI is available and configured"));
     }
 
-    println!();
-    println!("Validating variable groups...");
+    println!("{}", OutputFormatter::section("Variable Groups"));
 
     // Validate variable groups exist
     let group_results = validate_variable_groups(variable_groups, &client)?;
 
+    // Track counts for summary
+    let mut group_pass_count = 0;
+    let mut group_fail_count = 0;
+
     // Print group validation results
-    let mut has_group_failures = false;
     for result in &group_results {
         if result.exists {
-            println!("  [PASS] Variable group '{}' exists", result.group_name);
+            group_pass_count += 1;
+            println!("{}", OutputFormatter::success(&format!("Variable group '{}' exists", result.group_name)));
         } else {
-            has_group_failures = true;
-            println!("  [FAIL] Variable group '{}' not found", result.group_name);
+            group_fail_count += 1;
+            println!("{}", OutputFormatter::failure(&format!("Variable group '{}' not found", result.group_name)));
             if let Some(ref error) = result.error {
                 if args.verbose {
                     println!("         Error: {}", error);
                 }
             }
+            // Provide actionable suggestion
+            println!(
+                "         Suggestion: Create the variable group in Azure DevOps at:\n         https://dev.azure.com/{}/{}/_library?itemType=VariableGroups",
+                args.organization, args.project
+            );
         }
     }
 
     if group_results.is_empty() {
-        println!("  No variable groups referenced in pipeline");
+        println!("{}", OutputFormatter::info("No variable groups referenced in pipeline"));
     }
 
-    println!();
-    println!("Validating variable references...");
+    println!("{}", OutputFormatter::section("Variable References"));
 
     // Validate variables exist in groups
     let variable_results = validate_variables(variable_references, &group_results, &client)?;
 
+    // Track counts for summary
+    let mut var_pass_count = 0;
+    let mut var_fail_count = 0;
+
     // Print variable validation results
-    let mut has_variable_failures = false;
     for result in &variable_results {
         if result.exists {
+            var_pass_count += 1;
             if let Some(ref group_name) = result.group_name {
                 println!(
-                    "  [PASS] Variable '{}' found in group '{}'",
-                    result.variable_name, group_name
+                    "{}",
+                    OutputFormatter::success(&format!("Variable '{}' found in group '{}'", result.variable_name, group_name))
                 );
             } else {
-                println!("  [PASS] Variable '{}' found", result.variable_name);
+                println!("{}", OutputFormatter::success(&format!("Variable '{}' found", result.variable_name)));
             }
         } else {
-            has_variable_failures = true;
+            var_fail_count += 1;
             println!(
-                "  [FAIL] Variable '{}' not found in any referenced group",
-                result.variable_name
+                "{}",
+                OutputFormatter::failure(&format!("Variable '{}' not found in any referenced group", result.variable_name))
             );
             if let Some(ref error) = result.error {
                 if args.verbose {
                     println!("         Error: {}", error);
                 }
             }
+            // Provide actionable suggestion
+            println!("         Suggestion: Add this variable to one of the referenced variable groups,");
+            println!("         or verify the variable name is spelled correctly.");
         }
     }
 
     if variable_results.is_empty() {
-        println!("  No variable references found in pipeline");
+        println!("{}", OutputFormatter::info("No variable references found in pipeline"));
     }
 
-    // Print summary
-    println!();
-    println!("================================");
-    let total_failures =
-        group_results.iter().filter(|r| !r.exists).count()
-            + variable_results.iter().filter(|r| !r.exists).count();
+    // Calculate totals
+    let total_passed = group_pass_count + var_pass_count;
+    let total_failed = group_fail_count + var_fail_count;
 
-    if total_failures == 0 {
-        println!("Validation PASSED: All variable groups and variables exist");
-    } else {
-        println!(
-            "Validation FAILED: {} issue(s) found",
-            total_failures
-        );
-    }
+    // Print summary using OutputFormatter
+    println!("{}", OutputFormatter::summary(total_passed, total_failed));
 
-    Ok(has_group_failures || has_variable_failures)
+    Ok(total_failed > 0)
 }
