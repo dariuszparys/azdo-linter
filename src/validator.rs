@@ -16,6 +16,19 @@ pub struct GroupValidationResult {
     pub group_id: Option<i32>,
 }
 
+/// Result of validating a single variable reference
+#[derive(Debug)]
+pub struct VariableValidationResult {
+    /// Name of the variable being validated
+    pub variable_name: String,
+    /// Name of the variable group where it was found (if any)
+    pub group_name: Option<String>,
+    /// Whether the variable exists in any of the referenced groups
+    pub exists: bool,
+    /// Optional error message if validation failed
+    pub error: Option<String>,
+}
+
 /// Validate that variable groups exist in Azure DevOps
 ///
 /// # Arguments
@@ -43,6 +56,69 @@ pub fn validate_variable_groups(
                 exists: false,
                 error: Some(e.to_string()),
                 group_id: None,
+            },
+        };
+        results.push(result);
+    }
+
+    Ok(results)
+}
+
+/// Validate that variables referenced in the pipeline exist in the variable groups
+///
+/// # Arguments
+/// * `variable_references` - List of variable names referenced in the pipeline (using $(variableName) syntax)
+/// * `group_validation_results` - Results from validating variable groups (contains group IDs)
+/// * `client` - Azure DevOps client for API calls
+///
+/// # Returns
+/// * `Result<Vec<VariableValidationResult>>` - Validation results for each variable
+pub fn validate_variables(
+    variable_references: Vec<String>,
+    group_validation_results: &[GroupValidationResult],
+    client: &AzureDevOpsClient,
+) -> Result<Vec<VariableValidationResult>> {
+    // Collect all available variables from all existing groups
+    let mut available_variables: Vec<(String, String)> = Vec::new(); // (variable_name, group_name)
+
+    for group_result in group_validation_results {
+        if group_result.exists {
+            if let Some(group_id) = group_result.group_id {
+                match client.get_variables_in_group(group_id) {
+                    Ok(vars) => {
+                        for var in vars {
+                            available_variables.push((var, group_result.group_name.clone()));
+                        }
+                    }
+                    Err(_) => {
+                        // Skip groups that fail to fetch variables - already reported in group validation
+                    }
+                }
+            }
+        }
+    }
+
+    // Validate each variable reference
+    let mut results = Vec::new();
+
+    for var_name in variable_references {
+        // Search for the variable in all available groups
+        let found = available_variables
+            .iter()
+            .find(|(name, _)| name == &var_name);
+
+        let result = match found {
+            Some((_, group_name)) => VariableValidationResult {
+                variable_name: var_name,
+                group_name: Some(group_name.clone()),
+                exists: true,
+                error: None,
+            },
+            None => VariableValidationResult {
+                variable_name: var_name,
+                group_name: None,
+                exists: false,
+                error: Some("Variable not found in any referenced variable group".to_string()),
             },
         };
         results.push(result);
