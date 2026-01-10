@@ -3,7 +3,10 @@ use std::process;
 
 use azdo_linter::azure::AzureDevOpsClient;
 use azdo_linter::error::OutputFormatter;
-use azdo_linter::parser::{detect_template, extract_variable_references, parse_pipeline_file};
+use azdo_linter::parser::{
+    detect_template, extract_template_references, extract_variable_references,
+    extract_variable_references_from_content, parse_pipeline_file, resolve_template_path,
+};
 use azdo_linter::validator::{validate_variable_groups, validate_variables, VariableSource};
 
 /// Azure DevOps pipeline YAML validator
@@ -232,9 +235,154 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
         println!("{}", OutputFormatter::info("No variable references found in pipeline"));
     }
 
+    // Validate templates referenced in the pipeline
+    let template_refs = extract_template_references(&args.pipeline_file)?;
+    let mut template_pass_count = 0;
+    let mut template_fail_count = 0;
+
+    if !template_refs.is_empty() {
+        for template_ref in &template_refs {
+            let resolved_path = resolve_template_path(&args.pipeline_file, &template_ref.template_path);
+
+            // Build section header
+            let stage_info = template_ref
+                .stage_name
+                .as_ref()
+                .map(|s| format!(" (stage: {s})"))
+                .unwrap_or_default();
+            let groups_info = if template_ref.available_groups.is_empty() {
+                String::new()
+            } else {
+                format!(", groups: {}", template_ref.available_groups.join(", "))
+            };
+
+            println!(
+                "{}",
+                OutputFormatter::section(&format!(
+                    "Template: {}{}{}",
+                    template_ref.template_path, stage_info, groups_info
+                ))
+            );
+
+            // Check if template file exists
+            if !std::path::Path::new(&resolved_path).exists() {
+                println!(
+                    "{}",
+                    OutputFormatter::warning(&format!(
+                        "Template file not found: {} (resolved to: {})",
+                        template_ref.template_path, resolved_path
+                    ))
+                );
+                println!("         The template may be in a different repository or location.");
+                continue;
+            }
+
+            // Read and extract variable references from template
+            let template_content = std::fs::read_to_string(&resolved_path)?;
+            let template_var_refs = extract_variable_references_from_content(&template_content)?;
+
+            if template_var_refs.is_empty() {
+                println!(
+                    "{}",
+                    OutputFormatter::info("No variable references found in template")
+                );
+                continue;
+            }
+
+            if args.verbose {
+                println!(
+                    "{}",
+                    OutputFormatter::info(&format!(
+                        "Found {} variable reference(s) in template",
+                        template_var_refs.len()
+                    ))
+                );
+            }
+
+            // Validate template's variable groups exist (filter to only those we haven't validated yet)
+            let new_groups: Vec<String> = template_ref
+                .available_groups
+                .iter()
+                .filter(|g| !group_results.iter().any(|r| &r.group_name == *g))
+                .cloned()
+                .collect();
+
+            let template_group_results = if !new_groups.is_empty() {
+                validate_variable_groups(new_groups, &client)?
+            } else {
+                Vec::new()
+            };
+
+            // Combine all group results for validation
+            let all_group_results: Vec<_> = group_results
+                .iter()
+                .chain(template_group_results.iter())
+                .filter(|r| template_ref.available_groups.contains(&r.group_name))
+                .cloned()
+                .collect();
+
+            // Validate template variables
+            let template_var_results = validate_variables(
+                template_var_refs,
+                &all_group_results,
+                &template_ref.available_inline_vars,
+                &client,
+            )?;
+
+            // Print template variable validation results
+            for result in &template_var_results {
+                if result.exists {
+                    template_pass_count += 1;
+                    match &result.source {
+                        VariableSource::Group(group_name) => {
+                            println!(
+                                "{}",
+                                OutputFormatter::success(&format!(
+                                    "Variable '{}' found in group '{}'",
+                                    result.variable_name, group_name
+                                ))
+                            );
+                        }
+                        VariableSource::Inline => {
+                            println!(
+                                "{}",
+                                OutputFormatter::success(&format!(
+                                    "Variable '{}' defined inline in parent pipeline",
+                                    result.variable_name
+                                ))
+                            );
+                        }
+                        VariableSource::NotFound => {
+                            println!(
+                                "{}",
+                                OutputFormatter::success(&format!("Variable '{}' found", result.variable_name))
+                            );
+                        }
+                    }
+                } else {
+                    template_fail_count += 1;
+                    println!(
+                        "{}",
+                        OutputFormatter::failure(&format!(
+                            "Variable '{}' not found in available groups",
+                            result.variable_name
+                        ))
+                    );
+                    if !template_ref.available_groups.is_empty() {
+                        println!(
+                            "         Available groups: {}",
+                            template_ref.available_groups.join(", ")
+                        );
+                    }
+                    println!("         Suggestion: Add this variable to one of the available variable groups.");
+                }
+            }
+        }
+    }
+
     // Calculate totals
-    let total_passed = group_pass_count + var_pass_count;
-    let total_failed = group_fail_count + var_fail_count;
+    let total_passed = group_pass_count + var_pass_count + template_pass_count;
+    let total_failed = group_fail_count + var_fail_count + template_fail_count;
 
     // Print summary using OutputFormatter
     println!("{}", OutputFormatter::summary(total_passed, total_failed));

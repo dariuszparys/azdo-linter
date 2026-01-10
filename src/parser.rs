@@ -527,6 +527,149 @@ fn extract_parameter_names(yaml: &serde_yaml::Value) -> Vec<String> {
     names
 }
 
+/// A template reference found in a pipeline's jobs section
+#[derive(Debug, Clone)]
+pub struct TemplateReference {
+    /// Path to the template file (as specified in YAML)
+    pub template_path: String,
+    /// Name of the stage containing this template reference
+    pub stage_name: Option<String>,
+    /// Variable groups available in this template's scope (top-level + stage-level)
+    pub available_groups: Vec<String>,
+    /// Inline variables available in this template's scope
+    pub available_inline_vars: Vec<String>,
+}
+
+/// Extract template references from a pipeline file
+///
+/// Parses the raw YAML to find `- template: path` entries in jobs sections,
+/// collecting the variable groups available at each template's scope.
+///
+/// # Arguments
+/// * `path` - Path to the pipeline YAML file
+///
+/// # Returns
+/// * `Result<Vec<TemplateReference>>` - List of template references with their available groups
+pub fn extract_template_references(path: &str) -> Result<Vec<TemplateReference>> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read pipeline file: {path}"))?;
+
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse YAML in pipeline file: {path}"))?;
+
+    let mut references = Vec::new();
+
+    let mapping = match yaml.as_mapping() {
+        Some(m) => m,
+        None => return Ok(references),
+    };
+
+    // Collect top-level variable groups and inline variables
+    let mut top_level_groups = Vec::new();
+    let mut top_level_inline_vars = Vec::new();
+    if let Some(vars) = mapping.get(serde_yaml::Value::String("variables".to_string())) {
+        collect_groups_from_yaml_value(vars, &mut top_level_groups);
+        collect_inline_vars_from_yaml_value(vars, &mut top_level_inline_vars);
+    }
+
+    // Process stages
+    if let Some(stages) = mapping.get(serde_yaml::Value::String("stages".to_string())) {
+        if let Some(stages_seq) = stages.as_sequence() {
+            for stage in stages_seq {
+                if let Some(stage_map) = stage.as_mapping() {
+                    // Get stage name
+                    let stage_name = stage_map
+                        .get(serde_yaml::Value::String("stage".to_string()))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    // Collect stage-level variable groups
+                    let mut stage_groups = top_level_groups.clone();
+                    let mut stage_inline_vars = top_level_inline_vars.clone();
+                    if let Some(vars) = stage_map.get(serde_yaml::Value::String("variables".to_string())) {
+                        collect_groups_from_yaml_value(vars, &mut stage_groups);
+                        collect_inline_vars_from_yaml_value(vars, &mut stage_inline_vars);
+                    }
+
+                    // Process jobs in this stage
+                    if let Some(jobs) = stage_map.get(serde_yaml::Value::String("jobs".to_string())) {
+                        if let Some(jobs_seq) = jobs.as_sequence() {
+                            for job in jobs_seq {
+                                if let Some(job_map) = job.as_mapping() {
+                                    // Check if this is a template reference
+                                    if let Some(template_val) = job_map.get(serde_yaml::Value::String("template".to_string())) {
+                                        if let Some(template_path) = template_val.as_str() {
+                                            references.push(TemplateReference {
+                                                template_path: template_path.to_string(),
+                                                stage_name: stage_name.clone(),
+                                                available_groups: stage_groups.clone(),
+                                                available_inline_vars: stage_inline_vars.clone(),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(references)
+}
+
+/// Helper to collect variable groups from a YAML value
+fn collect_groups_from_yaml_value(value: &serde_yaml::Value, groups: &mut Vec<String>) {
+    if let Some(seq) = value.as_sequence() {
+        for item in seq {
+            if let Some(map) = item.as_mapping() {
+                if let Some(serde_yaml::Value::String(group_name)) =
+                    map.get(serde_yaml::Value::String("group".to_string()))
+                {
+                    if !groups.contains(group_name) {
+                        groups.push(group_name.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Helper to collect inline variable names from a YAML value
+fn collect_inline_vars_from_yaml_value(value: &serde_yaml::Value, vars: &mut Vec<String>) {
+    if let Some(seq) = value.as_sequence() {
+        for item in seq {
+            if let Some(map) = item.as_mapping() {
+                if let Some(serde_yaml::Value::String(var_name)) =
+                    map.get(serde_yaml::Value::String("name".to_string()))
+                {
+                    if !vars.contains(var_name) {
+                        vars.push(var_name.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Resolve a template path relative to the parent pipeline file
+///
+/// # Arguments
+/// * `parent_path` - Path to the parent pipeline file
+/// * `template_ref` - Template path as specified in YAML (may be relative)
+///
+/// # Returns
+/// * Resolved absolute or relative path to the template file
+pub fn resolve_template_path(parent_path: &str, template_ref: &str) -> String {
+    use std::path::Path;
+
+    let parent = Path::new(parent_path);
+    let parent_dir = parent.parent().unwrap_or(Path::new("."));
+
+    parent_dir.join(template_ref).to_string_lossy().to_string()
+}
+
 /// Extract variable references from raw YAML content string
 /// Filters out PowerShell expressions, system variables, and runtime output variables
 ///

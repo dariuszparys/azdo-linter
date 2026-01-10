@@ -4,7 +4,7 @@ use anyhow::Result;
 use crate::azure::AzureDevOpsClient;
 
 /// Result of validating a single variable group
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GroupValidationResult {
     /// Name of the variable group
     pub group_name: String,
