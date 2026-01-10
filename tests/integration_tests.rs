@@ -210,3 +210,23 @@ fn test_regular_variables_extracted_with_filtering() {
     // Should have exactly 3 variables (all the regular ones)
     assert_eq!(var_refs.len(), 3, "Should only have 3 regular variables after filtering");
 }
+
+/// Test parsing a pipeline with template conditional variables
+/// Verifies that variables inside ${{ if eq(...) }} blocks are extracted
+#[test]
+fn test_parse_pipeline_with_conditional_variables() {
+    let path = "tests/fixtures/pipeline_with_conditionals.yml";
+    let pipeline = parse_pipeline_file(path).expect("Failed to parse pipeline file");
+
+    // Should extract variable groups from inside conditionals
+    let groups = pipeline.get_variable_groups();
+    assert_eq!(groups.len(), 3, "Should find all 3 conditional variable groups");
+    assert!(groups.contains(&"app-vars-dev".to_string()));
+    assert!(groups.contains(&"app-vars-test".to_string()));
+    assert!(groups.contains(&"app-vars-prod".to_string()));
+
+    // Should extract inline variables from inside conditionals
+    let inline_vars = pipeline.get_inline_variable_names();
+    assert!(inline_vars.contains(&"serviceConnection".to_string()), "Should find serviceConnection from conditionals");
+    assert!(inline_vars.contains(&"buildNumber".to_string()), "Should find buildNumber");
+}

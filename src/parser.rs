@@ -156,10 +156,16 @@ impl Pipeline {
             match vars {
                 Variables::List(entries) => {
                     for entry in entries {
-                        if let VariableEntry::Group { group } = entry {
-                            if !groups.contains(group) {
-                                groups.push(group.clone());
+                        match entry {
+                            VariableEntry::Group { group } => {
+                                if !groups.contains(group) {
+                                    groups.push(group.clone());
+                                }
                             }
+                            VariableEntry::Conditional(value) => {
+                                Self::extract_groups_from_value(value, groups);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -204,10 +210,16 @@ impl Pipeline {
             match vars {
                 Variables::List(entries) => {
                     for entry in entries {
-                        if let VariableEntry::Named { name, .. } = entry {
-                            if !names.contains(name) {
-                                names.push(name.clone());
+                        match entry {
+                            VariableEntry::Named { name, .. } => {
+                                if !names.contains(name) {
+                                    names.push(name.clone());
+                                }
                             }
+                            VariableEntry::Conditional(value) => {
+                                Self::extract_inline_variables_from_value(value, names);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -220,6 +232,62 @@ impl Pipeline {
                     }
                 }
             }
+        }
+    }
+
+    /// Recursively extract variable groups from a serde_yaml::Value
+    /// This handles template conditionals like ${{ if eq(...) }} which contain nested variables
+    fn extract_groups_from_value(value: &serde_yaml::Value, groups: &mut Vec<String>) {
+        match value {
+            serde_yaml::Value::Mapping(map) => {
+                // Check if this mapping has a "group" key (direct variable group reference)
+                if let Some(serde_yaml::Value::String(group_name)) =
+                    map.get(&serde_yaml::Value::String("group".to_string()))
+                {
+                    if !groups.contains(group_name) {
+                        groups.push(group_name.clone());
+                    }
+                }
+                // Recurse into all values in the mapping
+                for (_key, val) in map {
+                    Self::extract_groups_from_value(val, groups);
+                }
+            }
+            serde_yaml::Value::Sequence(seq) => {
+                // Recurse into each item in the sequence
+                for item in seq {
+                    Self::extract_groups_from_value(item, groups);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Recursively extract inline variable names from a serde_yaml::Value
+    /// This handles template conditionals like ${{ if eq(...) }} which contain nested variables
+    fn extract_inline_variables_from_value(value: &serde_yaml::Value, names: &mut Vec<String>) {
+        match value {
+            serde_yaml::Value::Mapping(map) => {
+                // Check if this mapping has a "name" key (inline variable definition)
+                if let Some(serde_yaml::Value::String(var_name)) =
+                    map.get(&serde_yaml::Value::String("name".to_string()))
+                {
+                    if !names.contains(var_name) {
+                        names.push(var_name.clone());
+                    }
+                }
+                // Recurse into all values in the mapping
+                for (_key, val) in map {
+                    Self::extract_inline_variables_from_value(val, names);
+                }
+            }
+            serde_yaml::Value::Sequence(seq) => {
+                // Recurse into each item in the sequence
+                for item in seq {
+                    Self::extract_inline_variables_from_value(item, names);
+                }
+            }
+            _ => {}
         }
     }
 }

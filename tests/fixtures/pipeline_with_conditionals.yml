@@ -1,0 +1,53 @@
+# Pipeline with template conditional variables
+# This mimics the Azure DevOps ${{ if eq(...) }} syntax
+
+name: $(Build.Reason)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger: none
+pr: none
+
+parameters:
+  - name: environment
+    displayName: Environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - test
+      - prod
+
+variables:
+  - ${{ if eq(parameters.environment, 'dev') }}:
+      - group: app-vars-dev
+      - name: serviceConnection
+        value: sc-dev
+  - ${{ if eq(parameters.environment, 'test') }}:
+      - group: app-vars-test
+      - name: serviceConnection
+        value: sc-test
+  - ${{ if eq(parameters.environment, 'prod') }}:
+      - group: app-vars-prod
+      - name: serviceConnection
+        value: sc-prod
+  - name: buildNumber
+    value: "build-001"
+
+stages:
+  - stage: Build
+    displayName: Build Stage
+    jobs:
+      - job: BuildJob
+        displayName: Build Job
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: AzureCLI@2
+            displayName: Deploy
+            inputs:
+              azureSubscription: $(serviceConnection)
+              scriptType: pscore
+              scriptLocation: inlineScript
+              inlineScript: |
+                echo "Using connection: $(serviceConnection)"
+                echo "Build number: $(buildNumber)"
+                echo "Subscription: $(subscriptionId)"
