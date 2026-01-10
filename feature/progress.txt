@@ -3,9 +3,10 @@
 # Total stories: 20
 # Started: 2026-01-10
 
-Current story: 2
-Completed: 1
+Current story: 3
+Completed: 2
 
 ---
 # Story log (append completed stories below)
 2026-01-10 US-001: Add core dependencies to Cargo.toml
+2026-01-10 US-002: Create project module structure
