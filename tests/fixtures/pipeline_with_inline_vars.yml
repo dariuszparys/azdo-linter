@@ -1,0 +1,19 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: BuildConfiguration
+    value: 'Release'
+  - name: DotNetVersion
+    value: '6.0.x'
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - script: echo "Building $(BuildConfiguration) with .NET $(DotNetVersion)"
+            displayName: 'Build'

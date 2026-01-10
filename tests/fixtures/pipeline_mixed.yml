@@ -1,0 +1,26 @@
+trigger:
+  - main
+  - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - group: 'CommonSecrets'
+  - name: Environment
+    value: 'staging'
+  - group: 'DeploymentConfig'
+  - name: Timeout
+    value: '300'
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - script: echo "Building for $(Environment)"
+            displayName: 'Build'
+          - script: echo "Using secrets from $(ApiKey) with timeout $(Timeout)"
+            displayName: 'Configure'
+          - script: echo "Deploying with $(DeploymentToken) and $(ConnectionString)"
+            displayName: 'Deploy'

@@ -1,0 +1,17 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - group: 'ProductionSecrets'
+  - group: 'DatabaseConfig'
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - script: echo "Building with $(ConnectionString) and $(ApiKey)"
+            displayName: 'Build'

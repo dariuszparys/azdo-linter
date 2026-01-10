@@ -57,3 +57,13 @@ The implementation includes:
 - Build verification successful
 
 The next story to implement would be **US-013: Implement main CLI orchestration logic**.
+I've completed US-013: Implement main CLI orchestration logic. The story has been implemented with:
+
+- Updated `main()` to orchestrate the full validation workflow
+- Parses CLI arguments and the pipeline YAML file
+- Initializes `AzureDevOpsClient` with organization and project
+- Runs `validate_variable_groups` and `validate_variables`
+- Outputs human-readable results with [PASS]/[FAIL] indicators
+- Returns proper exit codes (0=success, 1=validation failures, 2=errors)
+
+The build succeeds and the story has been committed. There are still more stories with `passes: false` (US-014 through US-020), so the loop should continue with the next iteration.
