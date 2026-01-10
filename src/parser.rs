@@ -47,6 +47,28 @@ pub struct Pipeline {
     pub variables: Option<Vec<VariableEntry>>,
 }
 
+impl Pipeline {
+    /// Extract all variable group names referenced in the pipeline
+    ///
+    /// # Returns
+    /// * `Vec<String>` - Unique list of variable group names
+    pub fn get_variable_groups(&self) -> Vec<String> {
+        let mut groups = Vec::new();
+
+        if let Some(ref variables) = self.variables {
+            for entry in variables {
+                if let VariableEntry::Group { group } = entry {
+                    if !groups.contains(group) {
+                        groups.push(group.clone());
+                    }
+                }
+            }
+        }
+
+        groups
+    }
+}
+
 /// Parse a pipeline YAML file and return the Pipeline structure
 ///
 /// # Arguments

@@ -78,7 +78,7 @@
       "dependencies": ["US-003"],
       "priority": 4,
       "estimatedComplexity": "low",
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-005",

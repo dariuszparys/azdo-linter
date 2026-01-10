@@ -3,11 +3,12 @@
 # Total stories: 20
 # Started: 2026-01-10
 
-Current story: 4
-Completed: 3
+Current story: 5
+Completed: 4
 
 ---
 # Story log (append completed stories below)
 2026-01-10 US-001: Add core dependencies to Cargo.toml
 2026-01-10 US-002: Create project module structure
 2026-01-10 US-003: Define core data structures for pipeline YAML
+2026-01-10 US-004: Implement YAML file parser function
