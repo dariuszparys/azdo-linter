@@ -126,3 +126,243 @@ pub fn validate_variables(
 
     Ok(results)
 }
+
+/// Helper function to validate variables against pre-fetched available variables
+/// This is used for testing without needing to call Azure CLI
+pub fn validate_variables_against_available(
+    variable_references: Vec<String>,
+    available_variables: &[(String, String)], // (variable_name, group_name)
+) -> Vec<VariableValidationResult> {
+    let mut results = Vec::new();
+
+    for var_name in variable_references {
+        let found = available_variables
+            .iter()
+            .find(|(name, _)| name == &var_name);
+
+        let result = match found {
+            Some((_, group_name)) => VariableValidationResult {
+                variable_name: var_name,
+                group_name: Some(group_name.clone()),
+                exists: true,
+                error: None,
+            },
+            None => VariableValidationResult {
+                variable_name: var_name,
+                group_name: None,
+                exists: false,
+                error: Some("Variable not found in any referenced variable group".to_string()),
+            },
+        };
+        results.push(result);
+    }
+
+    results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Tests for GroupValidationResult struct
+    #[test]
+    fn test_group_validation_result_exists() {
+        let result = GroupValidationResult {
+            group_name: "MyGroup".to_string(),
+            exists: true,
+            error: None,
+            group_id: Some(123),
+        };
+
+        assert_eq!(result.group_name, "MyGroup");
+        assert!(result.exists);
+        assert!(result.error.is_none());
+        assert_eq!(result.group_id, Some(123));
+    }
+
+    #[test]
+    fn test_group_validation_result_not_found() {
+        let result = GroupValidationResult {
+            group_name: "MissingGroup".to_string(),
+            exists: false,
+            error: Some("Group not found".to_string()),
+            group_id: None,
+        };
+
+        assert_eq!(result.group_name, "MissingGroup");
+        assert!(!result.exists);
+        assert_eq!(result.error, Some("Group not found".to_string()));
+        assert!(result.group_id.is_none());
+    }
+
+    // Tests for VariableValidationResult struct
+    #[test]
+    fn test_variable_validation_result_found() {
+        let result = VariableValidationResult {
+            variable_name: "ApiKey".to_string(),
+            group_name: Some("Secrets".to_string()),
+            exists: true,
+            error: None,
+        };
+
+        assert_eq!(result.variable_name, "ApiKey");
+        assert_eq!(result.group_name, Some("Secrets".to_string()));
+        assert!(result.exists);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_variable_validation_result_not_found() {
+        let result = VariableValidationResult {
+            variable_name: "MissingVar".to_string(),
+            group_name: None,
+            exists: false,
+            error: Some("Variable not found".to_string()),
+        };
+
+        assert_eq!(result.variable_name, "MissingVar");
+        assert!(result.group_name.is_none());
+        assert!(!result.exists);
+        assert!(result.error.is_some());
+    }
+
+    // Tests for validate_variables_against_available function
+    #[test]
+    fn test_validate_all_variables_exist() {
+        let available = vec![
+            ("Var1".to_string(), "Group1".to_string()),
+            ("Var2".to_string(), "Group1".to_string()),
+            ("Var3".to_string(), "Group2".to_string()),
+        ];
+
+        let references = vec![
+            "Var1".to_string(),
+            "Var2".to_string(),
+            "Var3".to_string(),
+        ];
+
+        let results = validate_variables_against_available(references, &available);
+
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| r.exists));
+        assert!(results.iter().all(|r| r.error.is_none()));
+
+        // Check specific mappings
+        assert_eq!(results[0].group_name, Some("Group1".to_string()));
+        assert_eq!(results[1].group_name, Some("Group1".to_string()));
+        assert_eq!(results[2].group_name, Some("Group2".to_string()));
+    }
+
+    #[test]
+    fn test_validate_some_variables_missing() {
+        let available = vec![
+            ("Var1".to_string(), "Group1".to_string()),
+            ("Var2".to_string(), "Group1".to_string()),
+        ];
+
+        let references = vec![
+            "Var1".to_string(),
+            "MissingVar".to_string(),
+            "Var2".to_string(),
+        ];
+
+        let results = validate_variables_against_available(references, &available);
+
+        assert_eq!(results.len(), 3);
+
+        // First variable should exist
+        assert!(results[0].exists);
+        assert_eq!(results[0].variable_name, "Var1");
+
+        // Second variable should be missing
+        assert!(!results[1].exists);
+        assert_eq!(results[1].variable_name, "MissingVar");
+        assert!(results[1].error.is_some());
+
+        // Third variable should exist
+        assert!(results[2].exists);
+        assert_eq!(results[2].variable_name, "Var2");
+    }
+
+    #[test]
+    fn test_validate_no_variables_exist() {
+        let available = vec![
+            ("Var1".to_string(), "Group1".to_string()),
+        ];
+
+        let references = vec![
+            "Missing1".to_string(),
+            "Missing2".to_string(),
+        ];
+
+        let results = validate_variables_against_available(references, &available);
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| !r.exists));
+        assert!(results.iter().all(|r| r.group_name.is_none()));
+    }
+
+    #[test]
+    fn test_validate_empty_variable_references() {
+        let available = vec![
+            ("Var1".to_string(), "Group1".to_string()),
+        ];
+
+        let references: Vec<String> = vec![];
+
+        let results = validate_variables_against_available(references, &available);
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_validate_empty_available_variables() {
+        let available: Vec<(String, String)> = vec![];
+
+        let references = vec![
+            "Var1".to_string(),
+            "Var2".to_string(),
+        ];
+
+        let results = validate_variables_against_available(references, &available);
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| !r.exists));
+    }
+
+    #[test]
+    fn test_validate_variable_in_multiple_groups() {
+        // Same variable name in multiple groups - should find the first one
+        let available = vec![
+            ("SharedVar".to_string(), "Group1".to_string()),
+            ("SharedVar".to_string(), "Group2".to_string()),
+        ];
+
+        let references = vec!["SharedVar".to_string()];
+
+        let results = validate_variables_against_available(references, &available);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].exists);
+        // Should find the first occurrence (Group1)
+        assert_eq!(results[0].group_name, Some("Group1".to_string()));
+    }
+
+    #[test]
+    fn test_validate_case_sensitive_matching() {
+        let available = vec![
+            ("ConnectionString".to_string(), "Group1".to_string()),
+        ];
+
+        let references = vec![
+            "ConnectionString".to_string(),
+            "connectionstring".to_string(), // Different case
+        ];
+
+        let results = validate_variables_against_available(references, &available);
+
+        assert_eq!(results.len(), 2);
+        assert!(results[0].exists); // Exact match
+        assert!(!results[1].exists); // Case mismatch - not found
+    }
+}
