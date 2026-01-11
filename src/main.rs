@@ -29,6 +29,14 @@ struct Args {
     #[arg(short = 'j', long)]
     project: String,
 
+    /// Pipeline name in Azure DevOps (enables validation against pipeline-level variables)
+    #[arg(short = 'n', long)]
+    pipeline_name: Option<String>,
+
+    /// Pipeline ID in Azure DevOps (more reliable than name, find it in the URL as pipelineId=XXX)
+    #[arg(short = 'i', long)]
+    pipeline_id: Option<i32>,
+
     /// Enable verbose output for debugging
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -49,6 +57,12 @@ fn main() {
         println!("Pipeline file: {}", args.pipeline_file);
         println!("Organization: {}", args.organization);
         println!("Project: {}", args.project);
+        if let Some(id) = args.pipeline_id {
+            println!("Pipeline ID: {id}");
+        }
+        if let Some(ref name) = args.pipeline_name {
+            println!("Pipeline name: {name}");
+        }
     }
 
     match run_validation(&args) {
@@ -149,6 +163,76 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
         println!("{}", OutputFormatter::success("Azure CLI is available and configured"));
     }
 
+    // Fetch pipeline definition variables if pipeline ID or name provided
+    // Prefer pipeline_id over pipeline_name as it's more reliable
+    let pipeline_definition_vars: Vec<String> = if let Some(pipeline_id) = args.pipeline_id {
+        if args.verbose {
+            println!(
+                "{}",
+                OutputFormatter::info(&format!("Fetching variables from pipeline ID: {pipeline_id}"))
+            );
+        }
+        match client.get_pipeline_variable_names_by_id(pipeline_id) {
+            Ok(vars) => {
+                if args.verbose {
+                    println!(
+                        "{}",
+                        OutputFormatter::info(&format!(
+                            "Found {} pipeline definition variable(s)",
+                            vars.len()
+                        ))
+                    );
+                    for var in &vars {
+                        println!("       - {var}");
+                    }
+                }
+                vars
+            }
+            Err(e) => {
+                // Warn but don't fail - pipeline might not have variables
+                println!(
+                    "{}",
+                    OutputFormatter::warning(&format!("Could not fetch pipeline variables: {e}"))
+                );
+                Vec::new()
+            }
+        }
+    } else if let Some(ref pipeline_name) = args.pipeline_name {
+        if args.verbose {
+            println!(
+                "{}",
+                OutputFormatter::info(&format!("Fetching variables from pipeline: {pipeline_name}"))
+            );
+        }
+        match client.get_pipeline_variable_names(pipeline_name) {
+            Ok(vars) => {
+                if args.verbose {
+                    println!(
+                        "{}",
+                        OutputFormatter::info(&format!(
+                            "Found {} pipeline definition variable(s)",
+                            vars.len()
+                        ))
+                    );
+                    for var in &vars {
+                        println!("       - {var}");
+                    }
+                }
+                vars
+            }
+            Err(e) => {
+                // Warn but don't fail - pipeline might not have variables
+                println!(
+                    "{}",
+                    OutputFormatter::warning(&format!("Could not fetch pipeline variables: {e}"))
+                );
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
     println!("{}", OutputFormatter::section("Variable Groups"));
 
     // Validate variable groups exist
@@ -185,8 +269,14 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
 
     println!("{}", OutputFormatter::section("Variable References"));
 
-    // Validate variables exist in groups or are defined inline
-    let variable_results = validate_variables(variable_references, &group_results, &inline_variables, &client)?;
+    // Validate variables exist in groups, are defined inline, or are on the pipeline definition
+    let variable_results = validate_variables(
+        variable_references,
+        &group_results,
+        &inline_variables,
+        &pipeline_definition_vars,
+        &client,
+    )?;
 
     // Track counts for summary
     let mut var_pass_count = 0;
@@ -209,6 +299,12 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
                         OutputFormatter::success(&format!("Variable '{}' defined inline in pipeline", result.variable_name))
                     );
                 }
+                VariableSource::PipelineDefinition => {
+                    println!(
+                        "{}",
+                        OutputFormatter::success(&format!("Variable '{}' defined on pipeline", result.variable_name))
+                    );
+                }
                 VariableSource::NotFound => {
                     // This shouldn't happen if exists is true, but handle it gracefully
                     println!("{}", OutputFormatter::success(&format!("Variable '{}' found", result.variable_name)));
@@ -227,7 +323,10 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
             }
             // Provide actionable suggestion
             println!("         Suggestion: Add this variable to one of the referenced variable groups,");
-            println!("         or verify the variable name is spelled correctly.");
+            println!("         define it inline in the pipeline YAML, or add it to the pipeline definition.");
+            if args.pipeline_id.is_none() && args.pipeline_name.is_none() {
+                println!("         Tip: Use --pipeline-id or --pipeline-name to check variables defined on the pipeline itself.");
+            }
         }
     }
 
@@ -326,6 +425,7 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
                 template_var_refs,
                 &all_group_results,
                 &template_ref.available_inline_vars,
+                &pipeline_definition_vars,
                 &client,
             )?;
 
@@ -348,6 +448,15 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
                                 "{}",
                                 OutputFormatter::success(&format!(
                                     "Variable '{}' defined inline in parent pipeline",
+                                    result.variable_name
+                                ))
+                            );
+                        }
+                        VariableSource::PipelineDefinition => {
+                            println!(
+                                "{}",
+                                OutputFormatter::success(&format!(
+                                    "Variable '{}' defined on pipeline",
                                     result.variable_name
                                 ))
                             );

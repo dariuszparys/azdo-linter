@@ -21,8 +21,10 @@ pub struct GroupValidationResult {
 pub enum VariableSource {
     /// Variable found in a variable group
     Group(String),
-    /// Variable defined inline in the pipeline
+    /// Variable defined inline in the pipeline YAML
     Inline,
+    /// Variable defined on the pipeline definition (not in YAML)
+    PipelineDefinition,
     /// Variable not found
     NotFound,
 }
@@ -77,12 +79,14 @@ pub fn validate_variable_groups(
     Ok(results)
 }
 
-/// Validate that variables referenced in the pipeline exist in the variable groups or are defined inline
+/// Validate that variables referenced in the pipeline exist in the variable groups,
+/// are defined inline, or exist on the pipeline definition
 ///
 /// # Arguments
 /// * `variable_references` - List of variable names referenced in the pipeline (using $(variableName) syntax)
 /// * `group_validation_results` - Results from validating variable groups (contains group IDs)
 /// * `inline_variables` - List of variable names defined inline in the pipeline
+/// * `pipeline_definition_variables` - List of variable names defined on the pipeline definition
 /// * `client` - Azure DevOps client for API calls
 ///
 /// # Returns
@@ -91,6 +95,7 @@ pub fn validate_variables(
     variable_references: Vec<String>,
     group_validation_results: &[GroupValidationResult],
     inline_variables: &[String],
+    pipeline_definition_variables: &[String],
     client: &AzureDevOpsClient,
 ) -> Result<Vec<VariableValidationResult>> {
     // Collect all available variables from all existing groups
@@ -117,7 +122,7 @@ pub fn validate_variables(
     let mut results = Vec::new();
 
     for var_name in variable_references {
-        // First check if it's an inline variable
+        // First check if it's an inline variable (highest priority)
         if inline_variables.contains(&var_name) {
             results.push(VariableValidationResult {
                 variable_name: var_name,
@@ -125,6 +130,18 @@ pub fn validate_variables(
                 exists: true,
                 error: None,
                 source: VariableSource::Inline,
+            });
+            continue;
+        }
+
+        // Check if it's a pipeline definition variable
+        if pipeline_definition_variables.contains(&var_name) {
+            results.push(VariableValidationResult {
+                variable_name: var_name,
+                group_name: None,
+                exists: true,
+                error: None,
+                source: VariableSource::PipelineDefinition,
             });
             continue;
         }
@@ -162,20 +179,21 @@ pub fn validate_variables_against_available(
     variable_references: Vec<String>,
     available_variables: &[(String, String)], // (variable_name, group_name)
 ) -> Vec<VariableValidationResult> {
-    validate_variables_against_available_with_inline(variable_references, available_variables, &[])
+    validate_variables_against_available_with_inline(variable_references, available_variables, &[], &[])
 }
 
-/// Helper function to validate variables against pre-fetched available variables and inline variables
-/// This is used for testing without needing to call Azure CLI
+/// Helper function to validate variables against pre-fetched available variables, inline variables,
+/// and pipeline definition variables. This is used for testing without needing to call Azure CLI.
 pub fn validate_variables_against_available_with_inline(
     variable_references: Vec<String>,
     available_variables: &[(String, String)], // (variable_name, group_name)
     inline_variables: &[String],
+    pipeline_definition_variables: &[String],
 ) -> Vec<VariableValidationResult> {
     let mut results = Vec::new();
 
     for var_name in variable_references {
-        // First check if it's an inline variable
+        // First check if it's an inline variable (highest priority)
         if inline_variables.contains(&var_name) {
             results.push(VariableValidationResult {
                 variable_name: var_name,
@@ -183,6 +201,18 @@ pub fn validate_variables_against_available_with_inline(
                 exists: true,
                 error: None,
                 source: VariableSource::Inline,
+            });
+            continue;
+        }
+
+        // Check if it's a pipeline definition variable
+        if pipeline_definition_variables.contains(&var_name) {
+            results.push(VariableValidationResult {
+                variable_name: var_name,
+                group_name: None,
+                exists: true,
+                error: None,
+                source: VariableSource::PipelineDefinition,
             });
             continue;
         }
@@ -457,7 +487,7 @@ mod tests {
             "MissingVar".to_string(),
         ];
 
-        let results = validate_variables_against_available_with_inline(references, &available, &inline);
+        let results = validate_variables_against_available_with_inline(references, &available, &inline, &[]);
 
         assert_eq!(results.len(), 3);
 
@@ -487,11 +517,82 @@ mod tests {
 
         let references = vec!["SharedVar".to_string()];
 
-        let results = validate_variables_against_available_with_inline(references, &available, &inline);
+        let results = validate_variables_against_available_with_inline(references, &available, &inline, &[]);
 
         assert_eq!(results.len(), 1);
         assert!(results[0].exists);
         // Should be marked as inline, not group
         assert_eq!(results[0].source, VariableSource::Inline);
+    }
+
+    #[test]
+    fn test_validate_pipeline_definition_variables() {
+        let available = vec![("GroupVar".to_string(), "Group1".to_string())];
+        let inline = vec!["InlineVar".to_string()];
+        let pipeline_def = vec!["PipelineVar".to_string()];
+
+        let references = vec![
+            "GroupVar".to_string(),
+            "InlineVar".to_string(),
+            "PipelineVar".to_string(),
+            "MissingVar".to_string(),
+        ];
+
+        let results = validate_variables_against_available_with_inline(
+            references,
+            &available,
+            &inline,
+            &pipeline_def,
+        );
+
+        assert_eq!(results.len(), 4);
+        assert_eq!(results[0].source, VariableSource::Group("Group1".to_string()));
+        assert_eq!(results[1].source, VariableSource::Inline);
+        assert_eq!(results[2].source, VariableSource::PipelineDefinition);
+        assert_eq!(results[3].source, VariableSource::NotFound);
+    }
+
+    #[test]
+    fn test_inline_takes_precedence_over_pipeline_definition() {
+        // If a variable is both inline and in pipeline definition, inline should take precedence
+        let available: Vec<(String, String)> = vec![];
+        let inline = vec!["SharedVar".to_string()];
+        let pipeline_def = vec!["SharedVar".to_string()];
+
+        let references = vec!["SharedVar".to_string()];
+
+        let results = validate_variables_against_available_with_inline(
+            references,
+            &available,
+            &inline,
+            &pipeline_def,
+        );
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].exists);
+        // Should be marked as inline, not pipeline definition
+        assert_eq!(results[0].source, VariableSource::Inline);
+    }
+
+    #[test]
+    fn test_pipeline_definition_takes_precedence_over_group() {
+        // If a variable is both in pipeline definition and a group, pipeline definition should take precedence
+        let available = vec![("SharedVar".to_string(), "Group1".to_string())];
+        let inline: Vec<String> = vec![];
+        let pipeline_def = vec!["SharedVar".to_string()];
+
+        let references = vec!["SharedVar".to_string()];
+
+        let results = validate_variables_against_available_with_inline(
+            references,
+            &available,
+            &inline,
+            &pipeline_def,
+        );
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].exists);
+        // Should be marked as pipeline definition, not group
+        assert_eq!(results[0].source, VariableSource::PipelineDefinition);
     }
 }
