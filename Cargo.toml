@@ -1,6 +1,6 @@
 [package]
 name = "azdolint"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Dariusz Parys"]
 description = "CLI tool that validates Azure DevOps pipeline YAML files by checking that referenced variable groups and variables exist"
