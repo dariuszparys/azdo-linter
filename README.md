@@ -8,6 +8,9 @@ A command-line tool that validates Azure DevOps pipeline YAML files by checking 
 - Extracts variable group references and variable usages
 - Validates that variable groups exist in Azure DevOps
 - Validates that referenced variables exist in the variable groups
+- Supports template files with automatic detection and validation in parent context
+- Handles variables at top-level, stage, and job scopes
+- Supports template conditionals (`${{ if ... }}`) and map-syntax variables
 - Provides clear, actionable error messages with suggestions
 - Returns appropriate exit codes for CI/CD integration
 
@@ -40,7 +43,7 @@ This tool requires the Azure CLI with the Azure DevOps extension installed and c
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/azdo-linter.git
+git clone https://github.com/dariuszparys/azdo-linter.git
 cd azdo-linter
 
 # Build the project
@@ -169,13 +172,44 @@ variables:
 
 ### Inline Variables
 ```yaml
+# List format
 variables:
   - name: BuildConfiguration
     value: 'Release'
+
+# Map format
+variables:
+  BuildConfiguration: 'Release'
 ```
 
 ### Variable References
 The validator detects variable references using the `$(variableName)` syntax anywhere in the pipeline YAML.
+
+### Template Conditionals
+```yaml
+variables:
+  - ${{ if eq(parameters.environment, 'prod') }}:
+    - group: 'ProductionSecrets'
+  - ${{ else }}:
+    - group: 'DevelopmentSecrets'
+```
+
+### Stage and Job Scoped Variables
+Variables defined at stage or job level are properly scoped and validated:
+```yaml
+stages:
+  - stage: Build
+    variables:
+      - group: 'BuildSecrets'
+    jobs:
+      - job: BuildJob
+        variables:
+          - name: JobVar
+            value: 'value'
+```
+
+### Template Files
+Template files are automatically detected (files with `parameters:` but no `trigger:`). When run against a template directly, the linter shows a warning and skips validation. Templates are validated in the context of the parent pipeline that includes them.
 
 ## License
 
