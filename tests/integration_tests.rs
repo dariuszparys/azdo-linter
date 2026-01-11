@@ -1,6 +1,6 @@
 //! Integration tests for Azure DevOps pipeline YAML parsing
 
-use azdo_linter::parser::{extract_variable_references, parse_pipeline_file, VariableEntry};
+use azdolint::parser::{extract_variable_references, parse_pipeline_file, VariableEntry};
 
 /// Test parsing a pipeline file with variable groups only
 #[test]

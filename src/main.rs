@@ -1,13 +1,13 @@
 use clap::Parser;
 use std::process;
 
-use azdo_linter::azure::AzureDevOpsClient;
-use azdo_linter::error::OutputFormatter;
-use azdo_linter::parser::{
+use azdolint::azure::AzureDevOpsClient;
+use azdolint::error::OutputFormatter;
+use azdolint::parser::{
     detect_template, extract_template_references, extract_variable_references,
     extract_variable_references_from_content, parse_pipeline_file, resolve_template_path,
 };
-use azdo_linter::validator::{validate_variable_groups, validate_variables, VariableSource};
+use azdolint::validator::{validate_variable_groups, validate_variables, VariableSource};
 
 /// Azure DevOps pipeline YAML validator
 ///
