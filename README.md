@@ -1,5 +1,7 @@
 # Azure DevOps Pipeline Validator
 
+[![Crates.io](https://img.shields.io/crates/v/azdolint.svg)](https://crates.io/crates/azdolint)
+
 A command-line tool that validates Azure DevOps pipeline YAML files by checking that all referenced variable groups and variables actually exist in Azure DevOps.
 
 ## Features
@@ -39,6 +41,12 @@ This tool requires the Azure CLI with the Azure DevOps extension installed and c
 
 ## Installation
 
+### From crates.io (Recommended)
+
+```bash
+cargo install azdolint
+```
+
 ### From Source
 
 ```bash
@@ -49,10 +57,10 @@ cd azdo-linter
 # Build the project
 cargo build --release
 
-# The binary will be available at target/release/azdo-linter
+# The binary will be available at target/release/azdolint
 ```
 
-### Using Cargo
+### Using Cargo (local)
 
 ```bash
 cargo install --path .
@@ -61,7 +69,7 @@ cargo install --path .
 ## Usage
 
 ```bash
-azdo-linter --pipeline-file <PATH> --organization <ORG> --project <PROJECT> [OPTIONS]
+azdolint --pipeline-file <PATH> --organization <ORG> --project <PROJECT> [OPTIONS]
 ```
 
 ### Arguments
@@ -77,17 +85,17 @@ azdo-linter --pipeline-file <PATH> --organization <ORG> --project <PROJECT> [OPT
 
 **Basic validation:**
 ```bash
-azdo-linter --pipeline-file azure-pipelines.yml --organization myorg --project myproject
+azdolint --pipeline-file azure-pipelines.yml --organization myorg --project myproject
 ```
 
 **With full organization URL:**
 ```bash
-azdo-linter -p azure-pipelines.yml -o https://dev.azure.com/myorg -j myproject
+azdolint -p azure-pipelines.yml -o https://dev.azure.com/myorg -j myproject
 ```
 
 **Verbose output:**
 ```bash
-azdo-linter -p azure-pipelines.yml -o myorg -j myproject --verbose
+azdolint -p azure-pipelines.yml -o myorg -j myproject --verbose
 ```
 
 ## Exit Codes
@@ -106,7 +114,7 @@ The validator uses the following exit codes for CI/CD integration:
 # Azure DevOps Pipeline
 steps:
   - script: |
-      azdo-linter --pipeline-file azure-pipelines.yml \
+      azdolint --pipeline-file azure-pipelines.yml \
         --organization $(System.CollectionUri) \
         --project $(System.TeamProject)
     displayName: 'Validate Pipeline Variables'
