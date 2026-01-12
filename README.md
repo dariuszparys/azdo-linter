@@ -10,6 +10,8 @@ A command-line tool that validates Azure DevOps pipeline YAML files by checking 
 - Extracts variable group references and variable usages
 - Validates that variable groups exist in Azure DevOps
 - Validates that referenced variables exist in the variable groups
+- Validates pipeline definition variables (set via Azure DevOps UI) in addition to YAML-defined variables
+- Resolves variable references from three sources (inline YAML, pipeline definition, variable groups)
 - Supports template files with automatic detection and validation in parent context
 - Handles variables at top-level, stage, and job scopes
 - Supports template conditionals (`${{ if ... }}`) and map-syntax variables
@@ -79,6 +81,8 @@ azdolint --pipeline-file <PATH> --organization <ORG> --project <PROJECT> [OPTION
 | `--pipeline-file` | `-p` | Path to the Azure DevOps pipeline YAML file to validate |
 | `--organization` | `-o` | Azure DevOps organization name or URL |
 | `--project` | `-j` | Azure DevOps project name |
+| `--pipeline-name` | `-n` | Optional: Pipeline name in Azure DevOps (enables pipeline definition variable validation) |
+| `--pipeline-id` | `-i` | Optional: Pipeline ID in Azure DevOps (more reliable than name, find it in URL as pipelineId=XXX) |
 | `--verbose` | `-v` | Enable verbose output for debugging |
 
 ### Examples
@@ -96,6 +100,16 @@ azdolint -p azure-pipelines.yml -o https://dev.azure.com/myorg -j myproject
 **Verbose output:**
 ```bash
 azdolint -p azure-pipelines.yml -o myorg -j myproject --verbose
+```
+
+**With pipeline definition variable validation:**
+```bash
+azdolint -p azure-pipelines.yml -o myorg -j myproject --pipeline-id 42
+```
+
+Or using pipeline name:
+```bash
+azdolint -p azure-pipelines.yml -o myorg -j myproject --pipeline-name "My Pipeline"
 ```
 
 ## Exit Codes
@@ -167,6 +181,18 @@ RESULT: FAILED
 2 of 4 check(s) failed.
 ================================
 ```
+
+## Variable Resolution
+
+When validating variable references, the tool checks three sources in priority order:
+
+1. **Inline Variables** - Variables defined directly in the pipeline YAML file
+2. **Pipeline Definition Variables** - Variables set on the pipeline definition in Azure DevOps (requires `--pipeline-id` or `--pipeline-name`)
+3. **Variable Groups** - Variables defined in Azure DevOps library variable groups
+
+This means if a variable is defined in multiple places, the tool will find it and consider it valid. To enable pipeline definition variable validation, provide either `--pipeline-id` (recommended) or `--pipeline-name`.
+
+**Note:** Due to an Azure CLI bug, `--pipeline-id` is more reliable than `--pipeline-name`. You can find the pipeline ID in the Azure DevOps URL as `pipelineId=XXX`.
 
 ## Supported Pipeline Syntax
 
