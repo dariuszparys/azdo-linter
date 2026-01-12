@@ -37,6 +37,10 @@ struct Args {
     #[arg(short = 'i', long)]
     pipeline_id: Option<i32>,
 
+    /// Personal Access Token for Azure DevOps authentication (can also use AZDO_PAT env var)
+    #[arg(long, env = "AZDO_PAT")]
+    pat: Option<String>,
+
     /// Enable verbose output for debugging
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -151,17 +155,12 @@ fn run_validation(args: &Args) -> Result<bool, anyhow::Error> {
         }
     }
 
-    // Initialize Azure DevOps client
-    let client = AzureDevOpsClient::new(args.organization.clone(), args.project.clone());
-
-    // Check Azure CLI availability
-    if args.verbose {
-        println!("{}", OutputFormatter::info("Checking Azure CLI availability..."));
-    }
-    client.check_cli_available()?;
-    if args.verbose {
-        println!("{}", OutputFormatter::success("Azure CLI is available and configured"));
-    }
+    // Initialize Azure DevOps client with PAT authentication
+    let client = AzureDevOpsClient::new(
+        args.organization.clone(),
+        args.project.clone(),
+        args.pat.clone(),
+    )?;
 
     // Fetch pipeline definition variables if pipeline ID or name provided
     // Prefer pipeline_id over pipeline_name as it's more reliable

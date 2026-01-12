@@ -24,25 +24,46 @@ impl fmt::Display for PipelineParseError {
 
 impl Error for PipelineParseError {}
 
-/// Error when Azure CLI is not available or not configured
+/// Error when Azure DevOps API request fails
 #[derive(Debug)]
-pub struct AzureCliError {
+pub struct AzureApiError {
+    /// HTTP status code (if available)
+    pub status_code: Option<u16>,
     /// The specific error encountered
     pub message: String,
 }
 
-impl fmt::Display for AzureCliError {
+impl fmt::Display for AzureApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Azure CLI error: {}\n\nSuggestion: Ensure Azure CLI is installed and you are logged in with 'az login'. \
-            Also verify the Azure DevOps extension is installed with 'az extension add --name azure-devops'.",
-            self.message
-        )
+        match self.status_code {
+            Some(401) => write!(
+                f,
+                "Azure DevOps authentication failed: {}\n\n\
+                Suggestion: Check that your Personal Access Token (PAT) is valid and not expired.\n\
+                You can create a new PAT at: https://dev.azure.com/<org>/_usersSettings/tokens",
+                self.message
+            ),
+            Some(403) => write!(
+                f,
+                "Azure DevOps access denied: {}\n\n\
+                Suggestion: Check that your PAT has the following scopes:\n\
+                - Variable Groups: Read\n\
+                - Build: Read\n\
+                - Project and Team: Read",
+                self.message
+            ),
+            _ => write!(
+                f,
+                "Azure DevOps API error: {}\n\n\
+                Suggestion: Check your network connection and verify the organization/project names.\n\
+                Also ensure your PAT is valid (set via --pat or AZDO_PAT environment variable).",
+                self.message
+            ),
+        }
     }
 }
 
-impl Error for AzureCliError {}
+impl Error for AzureApiError {}
 
 /// Error when a variable group is not found in Azure DevOps
 #[derive(Debug)]

@@ -1,9 +1,11 @@
-//! Azure CLI integration for Azure DevOps API calls
+//! Azure DevOps REST API client
 
 use anyhow::{Context, Result};
+use base64::Engine;
+use reqwest::blocking::Client;
+use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::process::Command;
 
 /// Variable group data returned from Azure DevOps
 #[derive(Debug, Deserialize)]
@@ -40,7 +42,7 @@ pub struct PipelineVariableValue {
     pub allow_override: bool,
 }
 
-/// Pipeline info from az pipelines list
+/// Pipeline info from pipelines list
 #[derive(Debug, Deserialize)]
 pub struct PipelineInfo {
     /// Pipeline ID
@@ -49,51 +51,113 @@ pub struct PipelineInfo {
     pub name: String,
 }
 
-/// Client for interacting with Azure DevOps via Azure CLI
+/// Response wrapper for variable groups list endpoint
+#[derive(Debug, Deserialize)]
+struct VariableGroupsResponse {
+    #[serde(default)]
+    value: Vec<VariableGroupData>,
+}
+
+/// Response wrapper for pipelines list endpoint
+#[derive(Debug, Deserialize)]
+struct PipelinesResponse {
+    #[serde(default)]
+    value: Vec<PipelineInfo>,
+}
+
+/// Build definition response (contains variables)
+#[derive(Debug, Deserialize)]
+struct BuildDefinitionResponse {
+    #[serde(default)]
+    variables: HashMap<String, PipelineVariableValue>,
+}
+
+/// Client for interacting with Azure DevOps via REST API
+#[derive(Debug)]
 pub struct AzureDevOpsClient {
-    /// Azure DevOps organization URL or name
+    /// Azure DevOps organization URL
     pub organization: String,
     /// Azure DevOps project name
     pub project: String,
+    /// HTTP client
+    http_client: Client,
+    /// Authorization header value (pre-computed Basic auth)
+    auth_header: HeaderValue,
 }
 
 impl AzureDevOpsClient {
-    /// Create a new Azure DevOps client
+    /// Create a new Azure DevOps client with PAT authentication
     ///
     /// # Arguments
     /// * `organization` - Azure DevOps organization URL or name
     /// * `project` - Azure DevOps project name
-    pub fn new(organization: String, project: String) -> Self {
-        // Normalize organization to full URL if needed
-        let organization_url = if organization.starts_with("https://") || organization.starts_with("http://") {
-            organization
-        } else {
-            format!("https://dev.azure.com/{organization}")
-        };
-
-        Self {
-            organization: organization_url,
-            project,
-        }
-    }
-
-    /// Check if Azure CLI is available and configured
-    ///
-    /// Runs 'az --version' to verify Azure CLI is installed
+    /// * `pat` - Personal Access Token for authentication (optional, falls back to AZDO_PAT env var)
     ///
     /// # Returns
-    /// * `Result<()>` - Ok if CLI is available, Error otherwise
-    pub fn check_cli_available(&self) -> Result<()> {
-        let output = Command::new("az")
-            .arg("--version")
-            .output()
-            .with_context(|| "Failed to execute 'az --version'. Is Azure CLI installed?")?;
+    /// * `Result<Self>` - The client or an error if PAT is missing
+    pub fn new(organization: String, project: String, pat: Option<String>) -> Result<Self> {
+        // Normalize organization to full URL if needed
+        let organization_url =
+            if organization.starts_with("https://") || organization.starts_with("http://") {
+                organization
+            } else {
+                format!("https://dev.azure.com/{organization}")
+            };
 
-        if output.status.success() {
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Azure CLI check failed: {stderr}")
+        // Get PAT from argument or environment variable
+        let pat_value = pat.or_else(|| std::env::var("AZDO_PAT").ok()).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No authentication token provided. Set AZDO_PAT environment variable or use --pat argument."
+            )
+        })?;
+
+        // Create auth header: Basic base64(":" + PAT)
+        // Azure DevOps uses empty username with PAT as password
+        let auth_string = format!(":{}", pat_value);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(auth_string.as_bytes());
+        let auth_header = HeaderValue::from_str(&format!("Basic {}", encoded))
+            .context("Failed to create authorization header")?;
+
+        let http_client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .context("Failed to create HTTP client")?;
+
+        Ok(Self {
+            organization: organization_url,
+            project,
+            http_client,
+            auth_header,
+        })
+    }
+
+    /// Construct the project URL base
+    fn project_url(&self) -> String {
+        format!("{}/{}", self.organization, self.project)
+    }
+
+    /// Handle HTTP response status codes with helpful error messages
+    fn handle_response_error(
+        &self,
+        status: reqwest::StatusCode,
+        context: &str,
+    ) -> anyhow::Error {
+        match status.as_u16() {
+            401 => anyhow::anyhow!(
+                "Authentication failed for {}. Check that your PAT is valid and not expired.",
+                context
+            ),
+            403 => anyhow::anyhow!(
+                "Access denied for {}. Check that your PAT has sufficient permissions (Variable Groups Read, Build Read).",
+                context
+            ),
+            404 => anyhow::anyhow!("{} not found.", context),
+            _ => anyhow::anyhow!(
+                "HTTP {} error for {}: {}",
+                status.as_u16(),
+                context,
+                status.canonical_reason().unwrap_or("Unknown error")
+            ),
         }
     }
 
@@ -105,51 +169,42 @@ impl AzureDevOpsClient {
     /// # Returns
     /// * `Result<VariableGroupData>` - The variable group data if found
     pub fn get_variable_group(&self, group_name: &str) -> Result<VariableGroupData> {
-        // Use 'az pipelines variable-group list' with a filter query
-        let output = Command::new("az")
-            .args([
-                "pipelines",
-                "variable-group",
-                "list",
-                "--organization",
-                &self.organization,
-                "--project",
-                &self.project,
-                "--query",
-                &format!("[?name=='{group_name}'] | [0]"),
-                "--output",
-                "json",
-            ])
-            .output()
-            .with_context(|| {
-                format!(
-                    "Failed to execute 'az pipelines variable-group list' for group '{group_name}'"
-                )
-            })?;
+        let encoded_name = urlencoding::encode(group_name);
+        let url = format!(
+            "{}/_apis/distributedtask/variablegroups?groupName={}&api-version=7.0",
+            self.project_url(),
+            encoded_name
+        );
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!(
-                "Azure CLI command failed for variable group '{group_name}': {stderr}"
-            );
+        let response = self
+            .http_client
+            .get(&url)
+            .header(AUTHORIZATION, self.auth_header.clone())
+            .header(ACCEPT, "application/json")
+            .send()
+            .with_context(|| format!("Failed to send request for variable group '{}'", group_name))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(self.handle_response_error(
+                status,
+                &format!("variable group '{}'", group_name),
+            ));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
-
-        // Check if the result is null or empty (group not found)
-        if trimmed.is_empty() || trimmed == "null" {
-            anyhow::bail!("Variable group '{group_name}' not found");
-        }
-
-        // Parse the JSON response
-        let group_data: VariableGroupData = serde_json::from_str(trimmed).with_context(|| {
+        let groups_response: VariableGroupsResponse = response.json().with_context(|| {
             format!(
-                "Failed to parse Azure CLI response for variable group '{group_name}'"
+                "Failed to parse response for variable group '{}'",
+                group_name
             )
         })?;
 
-        Ok(group_data)
+        // Find exact match by name (API may return partial matches)
+        groups_response
+            .value
+            .into_iter()
+            .find(|g| g.name == group_name)
+            .ok_or_else(|| anyhow::anyhow!("Variable group '{}' not found", group_name))
     }
 
     /// Get all variable names from a variable group by ID
@@ -160,61 +215,44 @@ impl AzureDevOpsClient {
     /// # Returns
     /// * `Result<Vec<String>>` - List of variable names in the group
     pub fn get_variables_in_group(&self, group_id: i32) -> Result<Vec<String>> {
-        // Use 'az pipelines variable-group show' with the group ID
-        let output = Command::new("az")
-            .args([
-                "pipelines",
-                "variable-group",
-                "show",
-                "--id",
-                &group_id.to_string(),
-                "--organization",
-                &self.organization,
-                "--project",
-                &self.project,
-                "--output",
-                "json",
-            ])
-            .output()
+        let url = format!(
+            "{}/_apis/distributedtask/variablegroups/{}?api-version=7.0",
+            self.project_url(),
+            group_id
+        );
+
+        let response = self
+            .http_client
+            .get(&url)
+            .header(AUTHORIZATION, self.auth_header.clone())
+            .header(ACCEPT, "application/json")
+            .send()
             .with_context(|| {
                 format!(
-                    "Failed to execute 'az pipelines variable-group show' for group ID {group_id}"
+                    "Failed to send request for variable group ID {}",
+                    group_id
                 )
             })?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!(
-                "Azure CLI command failed for variable group ID {group_id}: {stderr}"
-            );
+        let status = response.status();
+        if !status.is_success() {
+            return Err(self.handle_response_error(
+                status,
+                &format!("variable group ID {}", group_id),
+            ));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
-
-        // Check if the result is null or empty (group not found)
-        if trimmed.is_empty() || trimmed == "null" {
-            anyhow::bail!("Variable group with ID {group_id} not found");
-        }
-
-        // Parse the JSON response
-        let group_data: VariableGroupData = serde_json::from_str(trimmed).with_context(|| {
+        let group_data: VariableGroupData = response.json().with_context(|| {
             format!(
-                "Failed to parse Azure CLI response for variable group ID {group_id}"
+                "Failed to parse response for variable group ID {}",
+                group_id
             )
         })?;
 
-        // Extract variable names from the variables HashMap
-        let variable_names: Vec<String> = group_data.variables.keys().cloned().collect();
-
-        Ok(variable_names)
+        Ok(group_data.variables.keys().cloned().collect())
     }
 
     /// Look up a pipeline ID by name
-    ///
-    /// Uses `az pipelines list --name` to find the pipeline, then extracts the ID.
-    /// This works around a bug in `az pipelines variable list --pipeline-name` which
-    /// fails to find pipelines by name, while `--pipeline-id` works correctly.
     ///
     /// # Arguments
     /// * `pipeline_name` - The name of the pipeline
@@ -222,57 +260,48 @@ impl AzureDevOpsClient {
     /// # Returns
     /// * `Result<i32>` - The pipeline ID if found
     pub fn get_pipeline_id_by_name(&self, pipeline_name: &str) -> Result<i32> {
-        // Note: We don't use --name filter because it doesn't work reliably
-        // (returns empty results even for exact matches). Instead, we list all
-        // pipelines and filter locally.
-        let output = Command::new("az")
-            .args([
-                "pipelines",
-                "list",
-                "--organization",
-                &self.organization,
-                "--project",
-                &self.project,
-                "--output",
-                "json",
-            ])
-            .output()
+        let url = format!("{}/_apis/pipelines?api-version=7.0", self.project_url());
+
+        let response = self
+            .http_client
+            .get(&url)
+            .header(AUTHORIZATION, self.auth_header.clone())
+            .header(ACCEPT, "application/json")
+            .send()
             .with_context(|| {
-                format!("Failed to execute 'az pipelines list' for pipeline '{pipeline_name}'")
+                format!(
+                    "Failed to send request for pipeline '{}'",
+                    pipeline_name
+                )
             })?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Azure CLI command failed when looking up pipeline '{pipeline_name}': {stderr}");
+        let status = response.status();
+        if !status.is_success() {
+            return Err(self.handle_response_error(
+                status,
+                &format!("pipeline '{}'", pipeline_name),
+            ));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
-
-        // Check for empty response
-        if trimmed.is_empty() || trimmed == "[]" || trimmed == "null" {
-            anyhow::bail!("Pipeline '{pipeline_name}' not found");
-        }
-
-        // Parse the JSON response (array of pipelines)
-        let pipelines: Vec<PipelineInfo> = serde_json::from_str(trimmed).with_context(|| {
-            format!("Failed to parse Azure CLI response when looking up pipeline '{pipeline_name}'")
+        let pipelines_response: PipelinesResponse = response.json().with_context(|| {
+            format!(
+                "Failed to parse response when looking up pipeline '{}'",
+                pipeline_name
+            )
         })?;
 
         // Find exact match by name
-        let pipeline = pipelines
+        pipelines_response
+            .value
             .iter()
             .find(|p| p.name == pipeline_name)
-            .ok_or_else(|| anyhow::anyhow!("Pipeline '{pipeline_name}' not found"))?;
-
-        Ok(pipeline.id)
+            .map(|p| p.id)
+            .ok_or_else(|| anyhow::anyhow!("Pipeline '{}' not found", pipeline_name))
     }
 
     /// Fetch pipeline definition variables from Azure DevOps by name
     ///
-    /// First resolves the pipeline name to an ID using `az pipelines list`,
-    /// then fetches variables using the ID. This works around a bug in the
-    /// Azure CLI where `--pipeline-name` doesn't work for `az pipelines variable list`.
+    /// First resolves the pipeline name to an ID, then fetches variables using the ID.
     ///
     /// # Arguments
     /// * `pipeline_name` - The name of the pipeline
@@ -283,10 +312,7 @@ impl AzureDevOpsClient {
         &self,
         pipeline_name: &str,
     ) -> Result<HashMap<String, PipelineVariableValue>> {
-        // First resolve name to ID (works around Azure CLI bug)
         let pipeline_id = self.get_pipeline_id_by_name(pipeline_name)?;
-
-        // Then fetch variables using the ID (which works reliably)
         self.get_pipeline_variables_by_id(pipeline_id)
     }
 
@@ -305,7 +331,7 @@ impl AzureDevOpsClient {
     /// Fetch pipeline definition variables from Azure DevOps by pipeline ID
     ///
     /// # Arguments
-    /// * `pipeline_id` - The ID of the pipeline (more reliable than name)
+    /// * `pipeline_id` - The ID of the pipeline
     ///
     /// # Returns
     /// * `Result<HashMap<String, PipelineVariableValue>>` - Map of variable name to value
@@ -313,47 +339,42 @@ impl AzureDevOpsClient {
         &self,
         pipeline_id: i32,
     ) -> Result<HashMap<String, PipelineVariableValue>> {
-        let output = Command::new("az")
-            .args([
-                "pipelines",
-                "variable",
-                "list",
-                "--pipeline-id",
-                &pipeline_id.to_string(),
-                "--organization",
-                &self.organization,
-                "--project",
-                &self.project,
-                "--output",
-                "json",
-            ])
-            .output()
+        // Use build definitions API to get pipeline with variables
+        let url = format!(
+            "{}/_apis/build/definitions/{}?api-version=7.0",
+            self.project_url(),
+            pipeline_id
+        );
+
+        let response = self
+            .http_client
+            .get(&url)
+            .header(AUTHORIZATION, self.auth_header.clone())
+            .header(ACCEPT, "application/json")
+            .send()
             .with_context(|| {
                 format!(
-                    "Failed to execute 'az pipelines variable list' for pipeline ID {pipeline_id}"
+                    "Failed to send request for pipeline ID {}",
+                    pipeline_id
                 )
             })?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Azure CLI command failed for pipeline ID {pipeline_id}: {stderr}");
+        let status = response.status();
+        if !status.is_success() {
+            return Err(self.handle_response_error(
+                status,
+                &format!("pipeline ID {}", pipeline_id),
+            ));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
+        let definition: BuildDefinitionResponse = response.json().with_context(|| {
+            format!(
+                "Failed to parse response for pipeline ID {}",
+                pipeline_id
+            )
+        })?;
 
-        // Check for empty response (pipeline has no variables or doesn't exist)
-        if trimmed.is_empty() || trimmed == "{}" || trimmed == "null" {
-            return Ok(HashMap::new());
-        }
-
-        // Parse the JSON response
-        let variables: HashMap<String, PipelineVariableValue> =
-            serde_json::from_str(trimmed).with_context(|| {
-                format!("Failed to parse Azure CLI response for pipeline ID {pipeline_id}")
-            })?;
-
-        Ok(variables)
+        Ok(definition.variables)
     }
 
     /// Get variable names from a pipeline definition by ID
@@ -374,20 +395,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_client_creation() {
-        let client = AzureDevOpsClient::new(
+    fn test_client_creation_with_pat() {
+        let result = AzureDevOpsClient::new(
             "https://dev.azure.com/myorg".to_string(),
             "myproject".to_string(),
+            Some("test-pat-token".to_string()),
         );
 
+        assert!(result.is_ok());
+        let client = result.unwrap();
         assert_eq!(client.organization, "https://dev.azure.com/myorg");
         assert_eq!(client.project, "myproject");
     }
 
     #[test]
     fn test_client_creation_with_org_name() {
-        let client = AzureDevOpsClient::new("myorg".to_string(), "myproject".to_string());
+        let result = AzureDevOpsClient::new(
+            "myorg".to_string(),
+            "myproject".to_string(),
+            Some("test-pat-token".to_string()),
+        );
 
+        assert!(result.is_ok());
+        let client = result.unwrap();
         // Organization name should be normalized to full URL
         assert_eq!(client.organization, "https://dev.azure.com/myorg");
         assert_eq!(client.project, "myproject");
@@ -395,19 +425,59 @@ mod tests {
 
     #[test]
     fn test_client_creation_preserves_full_url() {
-        let client = AzureDevOpsClient::new(
+        let result = AzureDevOpsClient::new(
             "https://dev.azure.com/customorg".to_string(),
             "myproject".to_string(),
+            Some("test-pat-token".to_string()),
         );
 
+        assert!(result.is_ok());
+        let client = result.unwrap();
         // Full URL should be preserved as-is
         assert_eq!(client.organization, "https://dev.azure.com/customorg");
         assert_eq!(client.project, "myproject");
     }
 
     #[test]
+    fn test_client_creation_without_pat_and_no_env() {
+        // Temporarily unset AZDO_PAT if it exists
+        let original = std::env::var("AZDO_PAT").ok();
+        std::env::remove_var("AZDO_PAT");
+
+        let result = AzureDevOpsClient::new(
+            "myorg".to_string(),
+            "myproject".to_string(),
+            None,
+        );
+
+        // Restore original value
+        if let Some(val) = original {
+            std::env::set_var("AZDO_PAT", val);
+        }
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("No authentication token provided"));
+    }
+
+    #[test]
+    fn test_project_url_construction() {
+        let client = AzureDevOpsClient::new(
+            "myorg".to_string(),
+            "myproject".to_string(),
+            Some("test-pat".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            client.project_url(),
+            "https://dev.azure.com/myorg/myproject"
+        );
+    }
+
+    #[test]
     fn test_parse_variable_group_response() {
-        // Sample Azure CLI response for variable group
+        // Sample Azure DevOps REST API response for variable group
         let json_response = r#"{
             "id": 123,
             "name": "ProductionSecrets",
@@ -623,5 +693,81 @@ mod tests {
         assert_eq!(var.value, Some("I'm a pipeline variable".to_string()));
         assert_eq!(var.is_secret, None); // null becomes None
         assert!(var.allow_override);
+    }
+
+    // Tests for REST API response wrappers
+
+    #[test]
+    fn test_parse_variable_groups_response() {
+        let json_response = r#"{
+            "count": 1,
+            "value": [{
+                "id": 123,
+                "name": "ProductionSecrets",
+                "variables": {
+                    "ApiKey": {"value": null, "isSecret": true}
+                }
+            }]
+        }"#;
+
+        let response: VariableGroupsResponse =
+            serde_json::from_str(json_response).expect("Failed to parse");
+
+        assert_eq!(response.value.len(), 1);
+        assert_eq!(response.value[0].name, "ProductionSecrets");
+    }
+
+    #[test]
+    fn test_parse_pipelines_response() {
+        let json_response = r#"{
+            "count": 2,
+            "value": [
+                {"id": 1, "name": "pipeline-1"},
+                {"id": 2, "name": "pipeline-2"}
+            ]
+        }"#;
+
+        let response: PipelinesResponse =
+            serde_json::from_str(json_response).expect("Failed to parse");
+
+        assert_eq!(response.value.len(), 2);
+        assert_eq!(response.value[0].name, "pipeline-1");
+        assert_eq!(response.value[1].name, "pipeline-2");
+    }
+
+    #[test]
+    fn test_parse_build_definition_response() {
+        let json_response = r#"{
+            "id": 42,
+            "name": "my-pipeline",
+            "variables": {
+                "BuildConfig": {
+                    "value": "Release",
+                    "isSecret": false,
+                    "allowOverride": true
+                }
+            }
+        }"#;
+
+        let response: BuildDefinitionResponse =
+            serde_json::from_str(json_response).expect("Failed to parse");
+
+        assert!(response.variables.contains_key("BuildConfig"));
+        let var = response.variables.get("BuildConfig").unwrap();
+        assert_eq!(var.value, Some("Release".to_string()));
+    }
+
+    #[test]
+    fn test_parse_empty_build_definition_response() {
+        // Build definition with no variables
+        let json_response = r#"{
+            "id": 42,
+            "name": "my-pipeline"
+        }"#;
+
+        let response: BuildDefinitionResponse =
+            serde_json::from_str(json_response).expect("Failed to parse");
+
+        assert!(response.variables.is_empty());
     }
 }
