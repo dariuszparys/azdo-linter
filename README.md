@@ -20,26 +20,22 @@ A command-line tool that validates Azure DevOps pipeline YAML files by checking 
 
 ## Prerequisites
 
-### Azure CLI
+### Personal Access Token (PAT)
 
-This tool requires the Azure CLI with the Azure DevOps extension installed and configured.
+This tool requires a Personal Access Token (PAT) from Azure DevOps with appropriate permissions.
 
-1. **Install Azure CLI**: Follow the [official installation guide](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
+1. **Create a PAT** in Azure DevOps:
+   - Navigate to https://dev.azure.com/YOUR_ORG/_usersSettings/tokens
+   - Click "New Token"
+   - Give it a descriptive name (e.g., "azdolint")
+   - Set the expiration as needed
+   - Select the following scopes:
+     - **Variable Groups**: Read
+     - **Build**: Read (required for pipeline definition variable validation)
 
-2. **Install Azure DevOps Extension**:
-   ```bash
-   az extension add --name azure-devops
-   ```
-
-3. **Login to Azure**:
-   ```bash
-   az login
-   ```
-
-4. **Configure Default Organization** (optional):
-   ```bash
-   az devops configure --defaults organization=https://dev.azure.com/YOUR_ORG
-   ```
+2. **Store the PAT securely**:
+   - Set it as an environment variable: `export AZDO_PAT=your-token-here`
+   - Or pass it directly via the `--pat` flag (not recommended for scripts)
 
 ## Installation
 
@@ -81,15 +77,22 @@ azdolint --pipeline-file <PATH> --organization <ORG> --project <PROJECT> [OPTION
 | `--pipeline-file` | `-p` | Path to the Azure DevOps pipeline YAML file to validate |
 | `--organization` | `-o` | Azure DevOps organization name or URL |
 | `--project` | `-j` | Azure DevOps project name |
+| `--pat` | `-t` | Personal Access Token for Azure DevOps API authentication (or set `AZDO_PAT` env var) |
 | `--pipeline-name` | `-n` | Optional: Pipeline name in Azure DevOps (enables pipeline definition variable validation) |
 | `--pipeline-id` | `-i` | Optional: Pipeline ID in Azure DevOps (more reliable than name, find it in URL as pipelineId=XXX) |
 | `--verbose` | `-v` | Enable verbose output for debugging |
 
 ### Examples
 
-**Basic validation:**
+**Using environment variable (recommended):**
 ```bash
+export AZDO_PAT=your-personal-access-token
 azdolint --pipeline-file azure-pipelines.yml --organization myorg --project myproject
+```
+
+**Using --pat flag:**
+```bash
+azdolint -p azure-pipelines.yml -o myorg -j myproject --pat $AZDO_PAT
 ```
 
 **With full organization URL:**
@@ -120,18 +123,22 @@ The validator uses the following exit codes for CI/CD integration:
 |-----------|---------|
 | `0` | Success - All variable groups and variables exist |
 | `1` | Validation failure - Some variable groups or variables were not found |
-| `2` | Error - Could not complete validation (e.g., Azure CLI not available, file not found) |
+| `2` | Error - Could not complete validation (e.g., authentication failed, file not found) |
 
 ### CI/CD Integration Example
 
 ```yaml
 # Azure DevOps Pipeline
+# Store your PAT as a secret variable named 'AZDO_PAT' in your pipeline or variable group
 steps:
   - script: |
       azdolint --pipeline-file azure-pipelines.yml \
         --organization $(System.CollectionUri) \
-        --project $(System.TeamProject)
+        --project $(System.TeamProject) \
+        --pat $(AZDO_PAT)
     displayName: 'Validate Pipeline Variables'
+    env:
+      AZDO_PAT: $(AZDO_PAT)
 ```
 
 ## Sample Output
@@ -192,7 +199,7 @@ When validating variable references, the tool checks three sources in priority o
 
 This means if a variable is defined in multiple places, the tool will find it and consider it valid. To enable pipeline definition variable validation, provide either `--pipeline-id` (recommended) or `--pipeline-name`.
 
-**Note:** Due to an Azure CLI bug, `--pipeline-id` is more reliable than `--pipeline-name`. You can find the pipeline ID in the Azure DevOps URL as `pipelineId=XXX`.
+**Note:** Using `--pipeline-id` is more reliable than `--pipeline-name` as it avoids potential issues with special characters or duplicate pipeline names. You can find the pipeline ID in the Azure DevOps URL as `pipelineId=XXX`.
 
 ## Supported Pipeline Syntax
 
